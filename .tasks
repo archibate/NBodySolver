@@ -1,0 +1,4 @@
+[+]
+build_target=NBaby
+;build_type=Debug
+build_type=Release
