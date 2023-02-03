@@ -39,7 +39,7 @@ struct FrameRotation {
     // 北极点赤纬（度）
     Degrees axisDeclination = 0.0;
 
-    void fixRotation() {
+    void toInertial() {
         referenceInstant = 0.0;
         referenceAngle = 0.0;
         angularFrequency = 0.0;
@@ -130,6 +130,28 @@ struct BodyTrajectory {
         Real index = binarySearch(historyInstants, instant);
         return {linearInterpolate(positionHistory, index), linearInterpolate(velocityHistory, index)};
     }
+
+    void resampleDensity(JulianDays newSampleDensity) {
+        if (newSampleDensity <= 0 || historyInstants.empty()) return;
+        auto minInstant = historyInstants.front();
+        auto maxInstant = historyInstants.back();
+        if (minInstant == maxInstant) return;
+        size_t newSize = (size_t)std::ceil((maxInstant - minInstant) / newSampleDensity);
+        std::vector<JulianDays> newHistoryInstants(newSize);
+        std::vector<Vector3<Kilometers>> newPositionHistory(newSize);
+        std::vector<Vector3<KilometersPerSecond>> newVelocityHistory(newSize);
+        JulianDays newInstant = minInstant;
+        for (size_t i = 0; i < newSize; i++) {
+            Real index = binarySearch(historyInstants, newInstant);
+            newHistoryInstants[i] = linearInterpolate(historyInstants, index);
+            newPositionHistory[i] = linearInterpolate(positionHistory, index);
+            newVelocityHistory[i] = linearInterpolate(velocityHistory, index);
+            newInstant = std::min(maxInstant, newInstant + newSampleDensity);
+        }
+        historyInstants = std::move(newHistoryInstants);
+        positionHistory = std::move(newPositionHistory);
+        velocityHistory = std::move(newVelocityHistory);
+    }
 };
 
 struct ReferenceFrame {
@@ -197,11 +219,11 @@ struct BodyGravityModel {
     // 天体名称
     BodyName name;
 
-    Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(BodyState const &body, Vector3<Kilometers> const &positionQuery) const {
+    Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> const &bodyPosition, Vector3<Kilometers> const &positionQuery) const {
         Vector3<Kilometers> delta;
-        delta.x = body.position.x - positionQuery.x;
-        delta.y = body.position.y - positionQuery.y;
-        delta.z = body.position.z - positionQuery.z;
+        delta.x = bodyPosition.x - positionQuery.x;
+        delta.y = bodyPosition.y - positionQuery.y;
+        delta.z = bodyPosition.z - positionQuery.z;
         Real distanceSquared = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
         Real referenceRadiusSquared = referenceRadius * referenceRadius;
         if (distanceSquared < referenceRadiusSquared) {
@@ -218,12 +240,24 @@ struct BodyGravityModel {
     }
 };
 
+struct SystemGravityModel; 
+
+struct SystemState {
+    std::vector<Vector3<Kilometers>> positions;
+    std::vector<Vector3<KilometersPerSecond>> velocities;
+
+    size_t numBodies() const {
+        assert(positions.size() == velocities.size());
+        return positions.size();
+    }
+};
+
 struct SystemGravityModel {
-    std::vector<BodyGravityModel> bodies;
+    std::vector<BodyGravityModel> bodyModels;
 
     Optional<size_t> getBodyIndexByName(std::string_view nameQuery) const {
         size_t index = 0;
-        for (auto const &body: bodies) {
+        for (auto const &body: bodyModels) {
             if (body.name == nameQuery) {
                 return index;
             }
@@ -235,7 +269,7 @@ struct SystemGravityModel {
     void initializeFromConfig(ConfigParser::Variant const &rootV) {
         auto modelV = rootV.dictEntry("principia_gravity_model:NEEDS[RealSolarSystem]");
         modelV.dictEntryForEach("body", [this] (auto, auto const &bodyV) {
-            auto &bodyM = bodies.emplace_back();
+            auto &bodyM = bodyModels.emplace_back();
             bodyM.name = bodyV.dictEntrySafe("name") & []F_LR(->getAtom()) | []F_L0("???");
             bodyM.gravitationalParameter = bodyV.dictEntrySafe("gravitational_parameter") & []F_LR(->getDouble()) | []F_L0(0.0);
             bodyM.rotation.referenceInstant = bodyV.dictEntrySafe("reference_instant") & []F_LR(->getDouble()) | []F_L0(0.0);
@@ -264,42 +298,141 @@ struct SystemGravityModel {
             });
         });
     }
+
+    Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery,
+                                                                std::vector<Vector3<Kilometers>> const &bodyPositions) const {
+        Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
+        for (size_t i = 0; i < bodyPositions.size(); i++) {
+            auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], positionQuery);
+            acceleration.x += accelI.x;
+            acceleration.y += accelI.y;
+            acceleration.z += accelI.z;
+        }
+        return acceleration;
+    }
+
+    Vector3<KilometersPerSecond2> gravityAccelerationAtBody(size_t indexQuery,
+                                                            std::vector<Vector3<Kilometers>> const &bodyPositions) const {
+        Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
+        for (size_t i = 0; i < bodyPositions.size(); i++) {
+            if (i == indexQuery) continue;
+            auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], bodyPositions[indexQuery]);
+            acceleration.x += accelI.x;
+            acceleration.y += accelI.y;
+            acceleration.z += accelI.z;
+        }
+        return acceleration;
+    }
+
+    void evaluateGravityAccelerations(std::vector<Vector3<KilometersPerSecond2>> const &positions,
+                                      std::vector<Vector3<KilometersPerSecond2>> &accelerations) const {
+#pragma omp for simd
+        for (size_t i = 0; i < positions.size(); i++) {
+            accelerations[i] = gravityAccelerationAtBody(i, positions);
+        }
+    }
 };
 
-struct SystemState {
-    std::vector<BodyState> bodies;
-    JulianDays instant;
+struct RungeKuttaSolver {
+    std::vector<Vector3<Kilometers>> pos2;
+    std::vector<Vector3<Kilometers>> pos3;
+    std::vector<Vector3<Kilometers>> pos4;
+    std::vector<Vector3<KilometersPerSecond>> vel2;
+    std::vector<Vector3<KilometersPerSecond>> vel3;
+    std::vector<Vector3<KilometersPerSecond2>> acc1;
+    std::vector<Vector3<KilometersPerSecond2>> acc2;
+    std::vector<Vector3<KilometersPerSecond2>> acc3;
+    std::vector<Vector3<KilometersPerSecond2>> acc4;
 
-    void initializeFromConfig(ConfigParser::Variant const &rootV, SystemGravityModel const &gravityModel) {
-        auto stateV = rootV.dictEntry("principia_initial_state:NEEDS[RealSolarSystem]");
-        instant = stateV.dictEntry("solar_system_epoch").getDouble();
-        bodies.resize(stateV.dictEntryCount("body"));
-        stateV.dictEntryForEach("body", [this, &gravityModel] (auto, auto const &bodyV) {
-            auto name = bodyV.dictEntry("name").getAtom();
-            auto index = gravityModel.getBodyIndexByName(name) | []F_DIE(0);
-            auto &bodyM = bodies[index];
-            bodyM.position.x = bodyV.dictEntry("x").getDouble();
-            bodyM.position.y = bodyV.dictEntry("y").getDouble();
-            bodyM.position.z = bodyV.dictEntry("z").getDouble();
-            bodyM.velocity.x = bodyV.dictEntry("vx").getDouble();
-            bodyM.velocity.y = bodyV.dictEntry("vy").getDouble();
-            bodyM.velocity.z = bodyV.dictEntry("vz").getDouble();
-        });
+    void setNumBodies(size_t n) {
+        pos2.resize(n);
+        pos3.resize(n);
+        pos4.resize(n);
+        vel2.resize(n);
+        vel3.resize(n);
+        acc1.resize(n);
+        acc2.resize(n);
+        acc3.resize(n);
+        acc4.resize(n);
+    }
+
+    // https://zh.wikipedia.org/wiki/%E9%BE%99%E6%A0%BC%EF%BC%8D%E5%BA%93%E5%A1%94%E6%B3%95
+    // y' = f(y)   y(t0) = y0
+    // g(r) = r / r^3
+    // G(p) = \sum_j m_j g(p_j - p)
+    // p_i' = v_i
+    // v_i' = G(p_i)
+    // y = (p, v)
+    // y' = (v, G(p))
+    // k1 = f(y) = (v, G(p))
+    // y + h/2 k1 = (p + h/2 v, v + h/2 G(p))
+    // k2 = f(y + h/2 k1) = (v + h/2 G(p), G(p + h/2 v))
+    // y + h/2 k2 = (p + h/2 (v + h/2 G(p)), v + h/2 G(p + h/2 v))
+    // k3 = f(y + h/2 k2) = (v + h/2 G(p + h/2 v), G(p + h/2 (v + h/2 G(p))))
+    // y + h k3 = (p + h (v + h/2 G(p + h/2 v)), v + h G(p + h/2 (v + h/2 G(p))))
+    // k4 = f(y + h k3) = (v + h G(p + h/2 (v + h/2 G(p))), G(p + h (v + h/2 G(p + h/2 v))))
+    // k = (\delta_p, \delta_v) = (k1 + 2 k2 + 2 k3 + k4) / 6
+    // \delta_p * 6 = v + 2 v + h G(p) + 2 v + h G(p + h/2 v) + v + h G(p + h/2 (v + h/2 G(p)))
+    // \delta_v * 6 = G(p) + 2 G(p + h/2 v) + 2 G(p + h/2 (v + h/2 G(p))) + G(p + h (v + h/2 G(p + h/2 v)))
+    // \delta_p = v + h/6 G(p) + h/6 G(p + h/2 v) + h/6 G(p + h/2 (v + h/2 G(p)))
+    // \delta_v = 1/6 G(p) + 1/3 G(p + h/2 v) + 1/3 G(p + h/2 (v + h/2 G(p))) + 1/6 G(p + h (v + h/2 G(p + h/2 v)))
+
+    void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
+        auto const &pos1 = state.positions; // p
+        model.evaluateGravityAccelerations(pos1, acc1); // G(p)
+        auto const &vel1 = state.velocities; // v
+        freeEvolveForTime(pos2, pos1, vel1, dt / 2.0); // p + h/2 v
+        model.evaluateGravityAccelerations(pos2, acc2); // G(p + h/2 v)
+        freeEvolveForTime(vel2, vel1, acc1, dt / 2.0); // v + h/2 G(p)
+        freeEvolveForTime(pos3, pos1, vel2, dt / 2.0); // p + h/2 (v + h/2 G(p))
+        model.evaluateGravityAccelerations(pos3, acc3); // G(p + h/2 (v + h/2 G(p)))
+        freeEvolveForTime(vel3, vel1, acc2, dt / 2.0); // v + h/2 G(p + h/2 v)
+        freeEvolveForTime(pos4, pos1, vel2, dt); // p + h (v + h/2 G(p + h/2 v))
+        model.evaluateGravityAccelerations(pos4, acc4); // G(p + h (v + h/2 G(p + h/2 v)))
+        correctedEvolvePosition(state.positions, state.velocities, dt);
+        correctedEvolveVelocity(state.velocities, dt);
+    }
+
+    void correctedEvolvePosition(std::vector<Vector3<Kilometers>> &positions,
+                                 std::vector<Vector3<KilometersPerSecond>> &velocities, Real dt) const {
+#pragma omp for simd
+        for (size_t i = 0; i < positions.size(); i++) {
+            Vector3<Real> correction = (1.0 / 6.0) * (acc1[i] + acc2[i] + acc3[i]);
+            positions[i] = positions[i] + (velocities[i] + correction * dt) * dt;
+        }
+    }
+
+    void correctedEvolveVelocity(std::vector<Vector3<KilometersPerSecond>> &velocities, Real dt) const {
+#pragma omp for simd
+        for (size_t i = 0; i < velocities.size(); i++) {
+            Vector3<Real> acceleration = (1.0 / 6.0) * (acc1[i] + 2.0 * acc2[i] + 2.0 * acc3[i] + acc4[i]);
+            velocities[i] = velocities[i] + acceleration * dt;
+        }
+    }
+
+    static void freeEvolveForTime(std::vector<Vector3<Real>> &newPositions,
+                                  std::vector<Vector3<Real>> const &positions,
+                                  std::vector<Vector3<Real>> const &velocities,
+                                  Seconds dt) {
+#pragma omp for simd
+        for (size_t i = 0; i < positions.size(); i++) {
+            newPositions[i] = positions[i] + velocities[i] * dt;
+        }
     }
 };
 
 struct SolarSystem {
     SystemGravityModel gravityModel;
-    SystemState currentState, nextState;
-    std::vector<Vector3<KilometersPerSecond2>> bodyAccelerations;
+    SystemState currentState;
     std::vector<BodyTrajectory> bodyTrajectories;
+    JulianDays currentInstant;
+    RungeKuttaSolver rungeKuttaSolver;
 
     void takeSnapshot() {
         for (size_t i = 0; i < bodyTrajectories.size(); i++) {
-            auto const &body = currentState.bodies[i];
-            bodyTrajectories[i].positionHistory.push_back(body.position);
-            bodyTrajectories[i].velocityHistory.push_back(body.velocity);
-            bodyTrajectories[i].historyInstants.push_back(currentState.instant);
+            bodyTrajectories[i].positionHistory.push_back(currentState.positions[i]);
+            bodyTrajectories[i].velocityHistory.push_back(currentState.velocities[i]);
+            bodyTrajectories[i].historyInstants.push_back(currentInstant);
         }
     }
 
@@ -309,154 +442,66 @@ struct SolarSystem {
 
     void initializeFromConfig(ConfigParser::Variant const &rootV) {
         gravityModel.initializeFromConfig(rootV);
-        currentState.initializeFromConfig(rootV, gravityModel);
-        nextState.bodies.resize(currentState.bodies.size());
-        bodyAccelerations.resize(currentState.bodies.size());
-        bodyTrajectories.resize(currentState.bodies.size());
+        {
+            auto stateV = rootV.dictEntry("principia_initial_state:NEEDS[RealSolarSystem]");
+            currentInstant = stateV.dictEntry("solar_system_epoch").getDouble();
+            size_t bodyCount = stateV.dictEntryCount("body");
+            currentState.positions.resize(bodyCount);
+            currentState.velocities.resize(bodyCount);
+            stateV.dictEntryForEach("body", [this] (auto, auto const &bodyV) {
+                auto name = bodyV.dictEntry("name").getAtom();
+                auto index = gravityModel.getBodyIndexByName(name) | []F_DIE(0);
+                auto &positionM = currentState.positions[index];
+                auto &velocityM = currentState.velocities[index];
+                positionM.x = bodyV.dictEntry("x").getDouble();
+                positionM.y = bodyV.dictEntry("y").getDouble();
+                positionM.z = bodyV.dictEntry("z").getDouble();
+                velocityM.x = bodyV.dictEntry("vx").getDouble();
+                velocityM.y = bodyV.dictEntry("vy").getDouble();
+                velocityM.z = bodyV.dictEntry("vz").getDouble();
+            });
+        }
+        assert(currentState.numBodies() == gravityModel.bodyModels.size());
+        rungeKuttaSolver.setNumBodies(currentState.numBodies());
+        bodyTrajectories.resize(currentState.numBodies());
     }
 
     size_t getBodyIndexByName(std::string_view nameQuery) const {
         return gravityModel.getBodyIndexByName(nameQuery) | []F_L0((size_t)-1);
     }
 
-    ReferenceFrame getBodyRotationalReferenceFrame(size_t bodyIndex) {
-        auto const &model = gravityModel.bodies[bodyIndex];
+    ReferenceFrame getBodyFixedReferenceFrame(size_t bodyIndex) {
+        auto const &model = gravityModel.bodyModels[bodyIndex];
         auto const &trajectory = bodyTrajectories[bodyIndex];
         return {model.rotation, trajectory};
     }
 
-    ReferenceFrame getBodyFixedReferenceFrame(size_t bodyIndex) {
-        auto frame = getBodyRotationalReferenceFrame(bodyIndex);
-        frame.rotation.fixRotation();
+    ReferenceFrame getBodyInertialReferenceFrame(size_t bodyIndex) {
+        auto frame = getBodyFixedReferenceFrame(bodyIndex);
+        frame.rotation.toInertial();
         return frame;
     }
 
     size_t numBodies() const {
-        assert(currentState.bodies.size() == gravityModel.bodies.size());
-        return currentState.bodies.size();
+        return currentState.numBodies();
     }
 
     Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery) const {
-        Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
-        for (size_t i = 0; i < numBodies(); i++) {
-            auto const &bodyI = currentState.bodies[i];
-            auto const &modelI = gravityModel.bodies[i];
-            auto accelI = modelI.gravityAccelerationAtPosition(bodyI, positionQuery);
-            acceleration.x += accelI.x;
-            acceleration.y += accelI.y;
-            acceleration.z += accelI.z;
+        return gravityModel.gravityAccelerationAtPosition(positionQuery, currentState.positions);
+    }
+
+    Vector3<KilometersPerSecond2> gravityAccelerationAtBody(size_t indexQuery) const {
+        return gravityModel.gravityAccelerationAtBody(indexQuery, currentState.positions);
+    }
+
+    void evolveForTime(Seconds dt) {
+        rungeKuttaSolver.evolveForTime(gravityModel, currentState, dt);
+        currentInstant = currentInstant + dt / 86400.0;
+    }
+
+    void evolveForTime(Seconds dt, size_t numSubSteps) {
+        for (size_t i = 0; i < numSubSteps; i++) {
+            evolveForTime(dt);
         }
-        return acceleration;
-    }
-
-    Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery, size_t excludeIndex) const {
-        Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
-        for (size_t i = 0; i < numBodies(); i++) {
-            if (i == excludeIndex) continue;
-            auto const &bodyI = currentState.bodies[i];
-            auto const &modelI = gravityModel.bodies[i];
-            auto accelI = modelI.gravityAccelerationAtPosition(bodyI, positionQuery);
-            acceleration.x += accelI.x;
-            acceleration.y += accelI.y;
-            acceleration.z += accelI.z;
-        }
-        return acceleration;
-    }
-
-    void computeNextStateRK1(Seconds dt) {
-        nextState.instant = currentState.instant + dt / 86400.0;
-#pragma omp parallel for
-        for (size_t i = 0; i < numBodies(); i++) {
-            auto const &bodyI = currentState.bodies[i];
-            auto &nextBodyI = nextState.bodies[i];
-            auto accelI = gravityAccelerationAtPosition(bodyI.position, i);
-            nextBodyI.velocity = bodyI.velocity + accelI * dt;
-            nextBodyI.position = bodyI.position + (nextBodyI.velocity + bodyI.velocity) * 0.5 * dt;
-        }
-    }
-
-    void computeNextStateRK2(Seconds dt) {
-        nextState.instant = currentState.instant + dt / 86400.0;
-        // p_mid = p - 0.5 * dt * velocity(p)
-        // p -= dt * velocity(p_mid)
-#pragma omp parallel for
-        for (size_t i = 0; i < numBodies(); i++) {
-            auto const &bodyI = currentState.bodies[i];
-            auto &nextBodyI = nextState.bodies[i];
-            auto p0 = bodyI.position;
-            auto v0 = bodyI.velocity;
-            auto a0 = gravityAccelerationAtPosition(p0, i);
-            auto p1 = p0 + 0.5 * dt * (v0 + 0.5 * dt * a0);
-            auto v1 = v0 + 0.5 * dt * a0;
-            auto a1 = gravityAccelerationAtPosition(p1, i);
-            nextBodyI.position = p0 + dt * v1;
-            nextBodyI.velocity = v0 + dt * a1;
-        }
-    }
-
-    void computeNextStateRK3(Seconds dt) {
-        nextState.instant = currentState.instant + dt / 86400.0;
-        //v1 = velocity(p)
-        //p1 = p - 0.5 * dt * v1
-        //v2 = velocity(p1)
-        //p2 = p - 0.75 * dt * v2
-        //v3 = velocity(p2)
-        //p -= dt * (2 / 9 * v1 + 1 / 3 * v2 + 4 / 9 * v3)
-#pragma omp parallel for
-        for (size_t i = 0; i < numBodies(); i++) {
-            auto const &bodyI = currentState.bodies[i];
-            auto &nextBodyI = nextState.bodies[i];
-            auto p0 = bodyI.position;
-            auto v0 = bodyI.velocity;
-            auto a0 = gravityAccelerationAtPosition(p0, i);
-            auto p1 = p0 + 0.5 * dt * (v0 + 0.5 * dt * a0);
-            auto v1 = v0 + 0.5 * dt * a0;
-            auto a1 = gravityAccelerationAtPosition(p1, i);
-            auto p2 = p0 + 0.75 * dt * (v1 + 0.75 * dt * a1);
-            auto v2 = v0 + 0.75 * dt * a1;
-            auto a2 = gravityAccelerationAtPosition(p2, i);
-            nextBodyI.position = p0 + dt * (2.0 / 9.0 * v0 + 1.0 / 3.0 * v1 + 4.0 / 9.0 * v2);
-            nextBodyI.velocity = v0 + dt * (2.0 / 9.0 * a0 + 1.0 / 3.0 * a1 + 4.0 / 9.0 * a2);
-        }
-    }
-
-    void evalGravityAccelerations() {
-#pragma omp parallel for
-        for (size_t i = 0; i < numBodies(); i++) {
-            auto const &bodyI = currentState.bodies[i];
-            bodyAccelerations[i] = gravityAccelerationAtPosition(bodyI.position, i);
-        }
-    }
-
-    void computeNextStateRK4(Seconds dt) {
-        nextState.instant = currentState.instant + dt / 86400.0;
-        evalGravityAccelerations();
-        // y' = f(y)   y(t0) = y0
-        // g(r) = r / r^3
-        // G(p) = \sum_j m_j g(p_j - p)
-        // p_i' = v_i
-        // v_i' = G(p_i)
-        // y = (p, v)
-        // y' = (v, G(p))
-        // k1 = f(y) = (v, G(p))
-        // y + h/2 k1 = (p + h/2 v, v + h/2 G(p))
-        // k2 = f(y + h/2 k1) = (v + h/2 G(p), G(p + h/2 v))
-        // y + h/2 k2 = (p + h/2 (v + h/2 G(p)), v + h/2 G(p + h/2 v))
-        // k3 = f(y + h/2 k2) = (v + h/2 G(p + h/2 v), G(p + h/2 (v + h/2 G(p))))
-        // y + h k3 = (p + h (v + h/2 G(p + h/2 v)), v + h G(p + h/2 (v + h/2 G(p))))
-        // k4 = f(y + h k3) = (v + h G(p + h/2 (v + h/2 G(p))), G(p + h (v + h/2 G(p + h/2 v))))
-        // k = (\delta_p, \delta_v) = (k1 + 2 k2 + 2 k3 + k4) / 6
-        // \delta_p * 6 = v + 2 v + h G(p) + 2 v + h G(p + h/2 v) + v + h G(p + h/2 (v + h/2 G(p)))
-        // \delta_v * 6 = G(p) + 2 G(p + h/2 v) + 2 G(p + h/2 (v + h/2 G(p))) + G(p + h (v + h/2 G(p + h/2 v)))
-        // \delta_p = v + h/6 G(p) + h/6 G(p + h/2 v) + h/6 G(p + h/2 (v + h/2 G(p)))
-        // \delta_v = 1/6 G(p) + 1/3 G(p + h/2 v) + 1/3 G(p + h/2 (v + h/2 G(p))) + 1/6 G(p + h (v + h/2 G(p + h/2 v)))
-    }
-
-    void computeNextState(Seconds dt) {
-        computeNextStateRK3(dt);
-    }
-
-    void swapStates() {
-        std::swap(nextState, currentState);
     }
 };
