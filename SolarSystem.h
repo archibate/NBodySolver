@@ -26,14 +26,13 @@ struct FrameRotation {
     Degrees axisDeclination = 90.0;
 
     // 从指定Z方向和X方向生成参考系转动
-    static FrameRotation fromDirectionAndTangent(Vector3<Real> const &direction, Vector3<Real> const &tangent, JulianDays instant) {
-        //auto bitangent = tangent.cross(direction);
+    static FrameRotation fromDirection(Vector3<Real> const &direction, JulianDays instant) {
         FrameRotation ret;
         ret.axisDeclination = direction.declination();
         ret.axisRightAscension = direction.rightAscension();
         ret.referenceInstant = instant;
-        ret.referenceAngle = 0; // todo
-        ret.angularFrequency = 0; // todo
+        ret.referenceAngle = 0;
+        ret.angularFrequency = 0;
         return ret;
     }
 
@@ -63,25 +62,11 @@ struct FrameRotation {
         position.rotateByY(90.0 - axisDeclination);
         position.rotateByZ(axisRightAscension);
     }
-
-    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
-    void worldToLocalVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        // TODO
-        worldToLocal(velocity, instant);
-    }
-
-    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
-    void localToWorldVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        // TODO
-        localToWorld(velocity, instant);
-    }
 };
 
 struct BodyTrajectory {
     // 位置历史（千米）
     std::vector<Vector3<Kilometers>> positionHistory;
-    // 速度历史（千米）
-    std::vector<Vector3<KilometersPerSecond>> velocityHistory;
     // 每个历史记录点的时间（儒略日数）
     std::vector<JulianDays> historyInstants;
 
@@ -96,12 +81,6 @@ struct BodyTrajectory {
     Vector3<Kilometers> positionAtInstant(JulianDays instant) const {
         Real index = binarySearch(historyInstants, instant);
         return linearInterpolate(positionHistory, index);
-    }
-
-    // 指定时间记录天体的速度
-    Vector3<KilometersPerSecond> velocityAtInstant(JulianDays instant) const {
-        Real index = binarySearch(historyInstants, instant);
-        return linearInterpolate(velocityHistory, index);
     }
 
     // 轨迹头部所在时间
@@ -123,18 +102,15 @@ struct BodyTrajectory {
         size_t newSize = (size_t)std::ceil((maxInstant - minInstant) / newSampleDensity);
         std::vector<JulianDays> newHistoryInstants(newSize);
         std::vector<Vector3<Kilometers>> newPositionHistory(newSize);
-        std::vector<Vector3<KilometersPerSecond>> newVelocityHistory(newSize);
         JulianDays newInstant = minInstant;
         for (size_t i = 0; i < newSize; i++) {
             Real index = binarySearch(historyInstants, newInstant);
             newHistoryInstants[i] = linearInterpolate(historyInstants, index);
             newPositionHistory[i] = linearInterpolate(positionHistory, index);
-            newVelocityHistory[i] = linearInterpolate(velocityHistory, index);
             newInstant = std::min(maxInstant, newInstant + newSampleDensity);
         }
         historyInstants = std::move(newHistoryInstants);
         positionHistory = std::move(newPositionHistory);
-        velocityHistory = std::move(newVelocityHistory);
     }
 };
 
@@ -149,13 +125,11 @@ struct ReferenceFrame {
     // 注：当存在对齐部分时旋转部分会被覆盖
 
     // 根据是否有对齐部分，获取真正的旋转部分，如果有则需指定当前时间以及要对齐天体当前的位置和速度
-    FrameRotation getRotation(JulianDays instant, Vector3<Kilometers> const &bodyPosition, Vector3<KilometersPerSecond> const &bodyVelocity) const {
+    FrameRotation getRotation(JulianDays instant, Vector3<Kilometers> const &bodyPosition) const {
         if (aligningTrajectory) {
             auto aligningPosition = aligningTrajectory->positionAtInstant(instant);
-            auto aligningVelocity = aligningTrajectory->velocityAtInstant(instant);
             auto aligningDirection = aligningPosition - bodyPosition;
-            auto aligningTangent = aligningVelocity - bodyVelocity;
-            auto aligningRotation = FrameRotation::fromDirectionAndTangent(aligningDirection, aligningTangent, instant);
+            auto aligningRotation = FrameRotation::fromDirection(aligningDirection, instant);
             return aligningRotation;
         } else {
             return rotation;
@@ -165,50 +139,28 @@ struct ReferenceFrame {
     // 把指定瞬间时的位置坐标从世界坐标系转换到自转坐标系
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
-        auto bodyVelocity = trajectory.velocityAtInstant(instant);
         position -= bodyPosition;
-        getRotation(instant, bodyPosition, bodyVelocity).worldToLocal(position, instant);
+        getRotation(instant, bodyPosition).worldToLocal(position, instant);
     }
 
     // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
-        auto bodyVelocity = trajectory.velocityAtInstant(instant);
-        getRotation(instant, bodyPosition, bodyVelocity).localToWorld(position, instant);
+        getRotation(instant, bodyPosition).localToWorld(position, instant);
         position += bodyPosition;
-    }
-
-    // 把指定瞬间时的速度矢量从世界坐标系转换到自转坐标系
-    void worldToLocalVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        auto bodyPosition = trajectory.positionAtInstant(instant);
-        auto bodyVelocity = trajectory.velocityAtInstant(instant);
-        velocity -= bodyVelocity;
-        getRotation(instant, bodyPosition, bodyVelocity).worldToLocalVelocity(velocity, instant);
-    }
-
-    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
-    void localToWorldVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        auto bodyPosition = trajectory.positionAtInstant(instant);
-        auto bodyVelocity = trajectory.velocityAtInstant(instant);
-        getRotation(instant, bodyPosition, bodyVelocity).localToWorldVelocity(velocity, instant);
-        velocity += bodyVelocity;
     }
 
     // 把轨迹从世界坐标系转换到自转坐标系
     void worldToLocal(BodyTrajectory &trajectory) const {
         for (size_t i = 0; i < trajectory.numHistoryCount(); i++) {
-            JulianDays instant = trajectory.historyInstants[i];
-            worldToLocal(trajectory.positionHistory[i], instant);
-            worldToLocalVelocity(trajectory.velocityHistory[i], instant);
+            worldToLocal(trajectory.positionHistory[i], trajectory.historyInstants[i]);
         }
     }
 
     // 把轨迹从自转坐标系转换到世界坐标系
     void localToWorld(BodyTrajectory &trajectory) const {
         for (size_t i = 0; i < trajectory.numHistoryCount(); i++) {
-            JulianDays instant = trajectory.historyInstants[i];
             localToWorld(trajectory.positionHistory[i], trajectory.historyInstants[i]);
-            localToWorldVelocity(trajectory.velocityHistory[i], instant);
         }
     }
 };
@@ -477,7 +429,6 @@ struct SolarSystem {
     void takeSnapshot() {
         for (size_t i = 0; i < bodyTrajectories.size(); i++) {
             bodyTrajectories[i].positionHistory.push_back(currentState.positions[i]);
-            bodyTrajectories[i].velocityHistory.push_back(currentState.velocities[i]);
             bodyTrajectories[i].historyInstants.push_back(currentInstant);
         }
     }
@@ -516,19 +467,19 @@ struct SolarSystem {
         return gravityModel.getBodyIndexByName(nameQuery) | []F_L0((size_t)-1);
     }
 
-    ReferenceFrame getBodyFixedReferenceFrame(size_t bodyIndex) {
+    ReferenceFrame getBodyFixedReferenceFrame(size_t bodyIndex) const {
         auto const &model = gravityModel.bodyModels[bodyIndex];
         auto const &trajectory = bodyTrajectories[bodyIndex];
         return {model.rotation, trajectory};
     }
 
-    ReferenceFrame getBodyInertialReferenceFrame(size_t bodyIndex) {
+    ReferenceFrame getBodyInertialReferenceFrame(size_t bodyIndex) const {
         auto frame = getBodyFixedReferenceFrame(bodyIndex);
         frame.rotation.toInertial();
         return frame;
     }
 
-    ReferenceFrame getBodyAlignedReferenceFrame(size_t bodyIndex, size_t aligningBodyIndex) {
+    ReferenceFrame getBodyAlignedReferenceFrame(size_t bodyIndex, size_t aligningBodyIndex) const {
         auto const &model = gravityModel.bodyModels[bodyIndex];
         auto const &trajectory = bodyTrajectories[bodyIndex];
         auto const &aligningTrajectory = bodyTrajectories[aligningBodyIndex];
