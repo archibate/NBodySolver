@@ -10,7 +10,6 @@
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
-#include "DebugHelper.h"
 
 // 参考系转动部分
 struct FrameRotation {
@@ -303,30 +302,30 @@ struct SystemGravityModel {
 };
 
 // RK1 求解器
-struct TrashEulerSolver {
-    std::vector<Vector3<KilometersPerSecond2>> acc1;
+//struct TrashEulerSolver {
+    //std::vector<Vector3<KilometersPerSecond2>> acc1;
 
-    void setNumBodies(size_t n) {
-        acc1.resize(n);
-    }
+    //void setNumBodies(size_t n) {
+        //acc1.resize(n);
+    //}
 
-    void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
-        auto &pos1 = state.positions; // p
-        model.evaluateGravityAccelerations(pos1, acc1); // G(p)
-        auto &vel1 = state.velocities; // v
-        freeEvolveForTime(pos1, vel1, dt); // p + h v
-        freeEvolveForTime(vel1, acc1, dt); // v + G(p)
-    }
+    //void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
+        //auto &pos1 = state.positions; // p
+        //model.evaluateGravityAccelerations(pos1, acc1); // G(p)
+        //auto &vel1 = state.velocities; // v
+        //freeEvolveForTime(pos1, vel1, dt); // p + h v
+        //freeEvolveForTime(vel1, acc1, dt); // v + G(p)
+    //}
 
-    static void freeEvolveForTime(std::vector<Vector3<Real>> &positions,
-                                  std::vector<Vector3<Real>> const &velocities,
-                                  Seconds dt) {
-#pragma omp for simd
-        for (size_t i = 0; i < positions.size(); i++) {
-            positions[i] = positions[i] + velocities[i] * dt;
-        }
-    }
-};
+    //static void freeEvolveForTime(std::vector<Vector3<Real>> &positions,
+                                  //std::vector<Vector3<Real>> const &velocities,
+                                  //Seconds dt) {
+//#pragma omp for simd
+        //for (size_t i = 0; i < positions.size(); i++) {
+            //positions[i] = positions[i] + velocities[i] * dt;
+        //}
+    //}
+//};
 
 // RK4 求解器
 struct RungeKuttaSolver {

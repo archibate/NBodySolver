@@ -1,7 +1,6 @@
 #pragma once
 
 #include "MathUtils.h"
-#include "DebugHelper.h"
 
 template <class T>
 struct Vector3 {
