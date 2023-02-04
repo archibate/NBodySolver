@@ -38,6 +38,7 @@ struct Vector3 {
     }
 };
 
+// 二分查找
 template <class T>
 static Real binarySearch(T const &arr, typename T::value_type val) {
     auto it = std::lower_bound(arr.begin(), arr.end(), val);
@@ -51,6 +52,7 @@ static Real binarySearch(T const &arr, typename T::value_type val) {
     return (Real)index + offset;
 }
 
+// 线性插值
 template <class T>
 static typename T::value_type linearInterpolate(T const &arr, Real val) {
     size_t index = (size_t)std::floor(val);
@@ -68,4 +70,6 @@ static constexpr Real kPI = M_PI;
 #else
 static constexpr Real kPI = 3.14159265358979323846;
 #endif
+
+// 度转弧度
 static constexpr Real kDegrees = kPI / 180.0;

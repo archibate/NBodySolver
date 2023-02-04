@@ -4,52 +4,45 @@
 #include <string>
 #include <vector>
 #include <cassert>
+#include "Optional.h"
 #include "MathUtils.h"
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
 
-using BodyName = std::string;
-
-struct BodyState {
-    // 位置（千米）
-    Vector3<Kilometers> position;
-    // 速度（千米）
-    Vector3<KilometersPerSecond> velocity;
-};
-
-struct GeoPotentialComponent {
-    int degree = 0;
-    int order = 0;
-    // 以下分别为 C[degree, order] 和 S[degree, order] 的值
-    // order 为 0 时，C[degree, 0] = J[degree]，S[degree, 0] = 0
-    Real cosValue = 0.0;
-    Real sinValue = 0.0;
-};
-
+// 参考系转动部分
 struct FrameRotation {
     // 参考瞬间（儒略日数）
     JulianDays referenceInstant = 0.0;
     // 参考瞬间时0°经线位置（度）
-    Degrees referenceAngle = 90.0;
+    Degrees referenceAngle = 0.0;
     // 自转频率（度/日）
     DegreesPreDay angularFrequency = 0.0;
     // 北极点赤经（度）
     Degrees axisRightAscension = 0.0;
     // 北极点赤纬（度）
-    Degrees axisDeclination = 0.0;
+    Degrees axisDeclination = 90.0;
 
+    // 从指定Z方向和X方向生成自转轴向
+    static FrameRotation fromDirectionAndTangent(Vector3<Real> const &direction, Vector3<Real> const &tangent) {
+        FrameRotation ret{};
+        return ret;
+    }
+
+    // 将参考系设为惯性无自转
     void toInertial() {
         referenceInstant = 0.0;
         referenceAngle = 0.0;
         angularFrequency = 0.0;
     }
 
+    // 指定瞬间时0°经线位置（度）
     Degrees angleAtInstant(JulianDays instantQuery) const {
         JulianDays deltaTime = instantQuery - referenceInstant;
-        return std::clamp(referenceAngle + angularFrequency * deltaTime, 0.0, 360.0);
+        return std::fmod(referenceAngle + angularFrequency * deltaTime, 360.0);
     }
 
+    // 把指定瞬间时的位置坐标从世界坐标系转换到自转坐标系
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
         {
             auto cosRA = std::cos(axisRightAscension * kDegrees);
@@ -78,6 +71,7 @@ struct FrameRotation {
         }
     }
 
+    // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
         {
             Degrees angle = angleAtInstant(instant);
@@ -106,35 +100,61 @@ struct FrameRotation {
         }
     }
 
+    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
     void worldToLocalVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
+        // TODO
         worldToLocal(velocity, instant);
     }
 
+    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
     void localToWorldVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
+        // TODO
         localToWorld(velocity, instant);
     }
 };
 
 struct BodyTrajectory {
+    // 位置历史（千米）
     std::vector<Vector3<Kilometers>> positionHistory;
+    // 速度历史（千米）
     std::vector<Vector3<KilometersPerSecond>> velocityHistory;
+    // 每个历史记录点的时间（儒略日数）
     std::vector<JulianDays> historyInstants;
 
+    // 历史记录点数量
     size_t numHistoryCount() const {
         assert(positionHistory.size() == historyInstants.size());
         assert(velocityHistory.size() == historyInstants.size());
         return positionHistory.size();
     }
 
-    BodyState stateAtInstant(JulianDays instant) const {
+    // 指定时间记录天体的位置
+    Vector3<Kilometers> positionAtInstant(JulianDays instant) const {
         Real index = binarySearch(historyInstants, instant);
-        return {linearInterpolate(positionHistory, index), linearInterpolate(velocityHistory, index)};
+        return linearInterpolate(positionHistory, index);
     }
 
-    void resampleDensity(JulianDays newSampleDensity) {
+    // 指定时间记录天体的速度
+    Vector3<KilometersPerSecond> velocityAtInstant(JulianDays instant) const {
+        Real index = binarySearch(historyInstants, instant);
+        return linearInterpolate(velocityHistory, index);
+    }
+
+    // 轨迹头部所在时间
+    JulianDays beginInstant() {
+        return !historyInstants.empty() ? historyInstants.front() : 0.0;
+    }
+
+    // 轨迹尾部所在时间
+    JulianDays endInstant() {
+        return !historyInstants.empty() ? historyInstants.back() : 0.0;
+    }
+
+    // 按指定密度重采样轨迹，用于调节采样点密度，如果指定第二参数则只保留指定时间区间内的轨迹
+    void resampleDensity(JulianDays newSampleDensity, Optional<std::pair<JulianDays, JulianDays>> newInstantRange = std::nullopt) {
         if (newSampleDensity <= 0 || historyInstants.empty()) return;
-        auto minInstant = historyInstants.front();
-        auto maxInstant = historyInstants.back();
+        auto minInstant = newInstantRange & []F_LR(.first) | [this]F_L0(historyInstants.front());
+        auto maxInstant = newInstantRange & []F_LR(.second) | [this]F_L0(historyInstants.back());
         if (minInstant == maxInstant) return;
         size_t newSize = (size_t)std::ceil((maxInstant - minInstant) / newSampleDensity);
         std::vector<JulianDays> newHistoryInstants(newSize);
@@ -154,60 +174,102 @@ struct BodyTrajectory {
     }
 };
 
+// 参考系
 struct ReferenceFrame {
     // 旋转部分
     FrameRotation rotation;
     // 平移部分
     BodyTrajectory trajectory;
+    // 对齐部分
+    Optional<BodyTrajectory> aligningTrajectory = std::nullopt;
+    // 注：当存在对齐部分时旋转部分会被覆盖
 
+    // 根据是否有对齐部分，获取真正的旋转部分，如果有则需指定当前时间以及要对齐天体当前的位置和速度
+    FrameRotation getRotation(JulianDays instant, Vector3<Kilometers> const &bodyPosition, Vector3<KilometersPerSecond> const &bodyVelocity) const {
+        if (aligningTrajectory) {
+            auto aligningPosition = aligningTrajectory->positionAtInstant(instant);
+            auto aligningVelocity = aligningTrajectory->velocityAtInstant(instant);
+            auto aligningDirection = aligningPosition - bodyPosition;
+            auto aligningTangent = aligningVelocity - bodyVelocity;
+            auto aligningRotation = FrameRotation::fromDirectionAndTangent(aligningDirection, aligningTangent);
+            return aligningRotation;
+        } else {
+            return rotation;
+        }
+    }
+
+    // 把指定瞬间时的位置坐标从世界坐标系转换到自转坐标系
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
-        auto bodyPosition = trajectory.stateAtInstant(instant).position;
+        auto bodyPosition = trajectory.positionAtInstant(instant);
+        auto bodyVelocity = trajectory.velocityAtInstant(instant);
         position.x -= bodyPosition.x;
         position.y -= bodyPosition.y;
         position.z -= bodyPosition.z;
-        rotation.worldToLocal(position, instant);
+        getRotation(instant, bodyPosition, bodyVelocity).worldToLocal(position, instant);
     }
 
+    // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
-        rotation.localToWorld(position, instant);
-        auto bodyPosition = trajectory.stateAtInstant(instant).position;
+        auto bodyPosition = trajectory.positionAtInstant(instant);
+        auto bodyVelocity = trajectory.velocityAtInstant(instant);
+        getRotation(instant, bodyPosition, bodyVelocity).localToWorld(position, instant);
         position.x += bodyPosition.x;
         position.y += bodyPosition.y;
         position.z += bodyPosition.z;
     }
 
+    // 把指定瞬间时的速度矢量从世界坐标系转换到自转坐标系
     void worldToLocalVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        auto bodyVelocity = trajectory.stateAtInstant(instant).velocity;
+        auto bodyPosition = trajectory.positionAtInstant(instant);
+        auto bodyVelocity = trajectory.velocityAtInstant(instant);
         velocity.x -= bodyVelocity.x;
         velocity.y -= bodyVelocity.y;
         velocity.z -= bodyVelocity.z;
-        rotation.worldToLocalVelocity(velocity, instant);
+        getRotation(instant, bodyPosition, bodyVelocity).worldToLocalVelocity(velocity, instant);
     }
 
+    // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
     void localToWorldVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
-        rotation.localToWorldVelocity(velocity, instant);
-        auto bodyVelocity = trajectory.stateAtInstant(instant).velocity;
+        auto bodyPosition = trajectory.positionAtInstant(instant);
+        auto bodyVelocity = trajectory.velocityAtInstant(instant);
+        getRotation(instant, bodyPosition, bodyVelocity).localToWorldVelocity(velocity, instant);
         velocity.x += bodyVelocity.x;
         velocity.y += bodyVelocity.y;
         velocity.z += bodyVelocity.z;
     }
 
+    // 把轨迹从世界坐标系转换到自转坐标系
     void worldToLocal(BodyTrajectory &trajectory) const {
         for (size_t i = 0; i < trajectory.numHistoryCount(); i++) {
-            worldToLocal(trajectory.positionHistory[i], trajectory.historyInstants[i]);
-            worldToLocalVelocity(trajectory.velocityHistory[i], trajectory.historyInstants[i]);
+            JulianDays instant = trajectory.historyInstants[i];
+            worldToLocal(trajectory.positionHistory[i], instant);
+            worldToLocalVelocity(trajectory.velocityHistory[i], instant);
         }
     }
 
+    // 把轨迹从自转坐标系转换到世界坐标系
     void localToWorld(BodyTrajectory &trajectory) const {
         for (size_t i = 0; i < trajectory.numHistoryCount(); i++) {
+            JulianDays instant = trajectory.historyInstants[i];
             localToWorld(trajectory.positionHistory[i], trajectory.historyInstants[i]);
-            localToWorldVelocity(trajectory.velocityHistory[i], trajectory.historyInstants[i]);
+            localToWorldVelocity(trajectory.velocityHistory[i], instant);
         }
     }
 };
 
+// 天体引力模型
 struct BodyGravityModel {
+    // 引力摄动分量
+    struct GeoPotentialComponent {
+        int degree = 0;
+        int order = 0;
+        // C[degree, order] 的值
+        Real cosValue = 0.0;
+        // S[degree, order] 的值
+        Real sinValue = 0.0;
+        // 注：order 为 0 时，C[degree, 0] 即为 J[degree]，S[degree, 0] 固定为 0
+    };
+
     // 引力参数（GM）
     Kilometers3PerSeconds2 gravitationalParameter;
     // 参考半径（千米）
@@ -217,8 +279,9 @@ struct BodyGravityModel {
     // 自转参考系
     FrameRotation rotation;
     // 天体名称
-    BodyName name;
+    std::string name;
 
+    // 指定中心天体（以本引力模型）位置对指定探针位置处的引力加速度
     Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> const &bodyPosition, Vector3<Kilometers> const &positionQuery) const {
         Vector3<Kilometers> delta;
         delta.x = bodyPosition.x - positionQuery.x;
@@ -242,8 +305,11 @@ struct BodyGravityModel {
 
 struct SystemGravityModel; 
 
+// 系统状态
 struct SystemState {
+    // 位置（千米）
     std::vector<Vector3<Kilometers>> positions;
+    // 速度（千米/秒）
     std::vector<Vector3<KilometersPerSecond>> velocities;
 
     size_t numBodies() const {
@@ -252,6 +318,7 @@ struct SystemState {
     }
 };
 
+// 系统引力模型
 struct SystemGravityModel {
     std::vector<BodyGravityModel> bodyModels;
 
@@ -299,6 +366,7 @@ struct SystemGravityModel {
         });
     }
 
+    // 指定位置受到的引力
     Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery,
                                                                 std::vector<Vector3<Kilometers>> const &bodyPositions) const {
         Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
@@ -311,6 +379,7 @@ struct SystemGravityModel {
         return acceleration;
     }
 
+    // 指定天体受到的引力
     Vector3<KilometersPerSecond2> gravityAccelerationAtBody(size_t indexQuery,
                                                             std::vector<Vector3<Kilometers>> const &bodyPositions) const {
         Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
@@ -324,6 +393,7 @@ struct SystemGravityModel {
         return acceleration;
     }
 
+    // 已知各个天体的位置，根据本引力模型，求各个天体受到的引力加速度
     void evaluateGravityAccelerations(std::vector<Vector3<KilometersPerSecond2>> const &positions,
                                       std::vector<Vector3<KilometersPerSecond2>> &accelerations) const {
 #pragma omp for simd
@@ -333,6 +403,33 @@ struct SystemGravityModel {
     }
 };
 
+// RK1 求解器
+struct TrashEulerSolver {
+    std::vector<Vector3<KilometersPerSecond2>> acc1;
+
+    void setNumBodies(size_t n) {
+        acc1.resize(n);
+    }
+
+    void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
+        auto &pos1 = state.positions; // p
+        model.evaluateGravityAccelerations(pos1, acc1); // G(p)
+        auto &vel1 = state.velocities; // v
+        freeEvolveForTime(pos1, vel1, dt); // p + h v
+        freeEvolveForTime(vel1, acc1, dt); // v + G(p)
+    }
+
+    static void freeEvolveForTime(std::vector<Vector3<Real>> &positions,
+                                  std::vector<Vector3<Real>> const &velocities,
+                                  Seconds dt) {
+#pragma omp for simd
+        for (size_t i = 0; i < positions.size(); i++) {
+            positions[i] = positions[i] + velocities[i] * dt;
+        }
+    }
+};
+
+// RK4 求解器
 struct RungeKuttaSolver {
     std::vector<Vector3<Kilometers>> pos2;
     std::vector<Vector3<Kilometers>> pos3;
@@ -421,12 +518,14 @@ struct RungeKuttaSolver {
     }
 };
 
+// 太阳系仿真系统
 struct SolarSystem {
     SystemGravityModel gravityModel;
     SystemState currentState;
     std::vector<BodyTrajectory> bodyTrajectories;
     JulianDays currentInstant;
     RungeKuttaSolver rungeKuttaSolver;
+    //TrashEulerSolver rungeKuttaSolver;
 
     void takeSnapshot() {
         for (size_t i = 0; i < bodyTrajectories.size(); i++) {
@@ -480,6 +579,13 @@ struct SolarSystem {
         auto frame = getBodyFixedReferenceFrame(bodyIndex);
         frame.rotation.toInertial();
         return frame;
+    }
+
+    ReferenceFrame getBodyAlignedReferenceFrame(size_t bodyIndex, size_t aligningBodyIndex) {
+        auto const &model = gravityModel.bodyModels[bodyIndex];
+        auto const &trajectory = bodyTrajectories[bodyIndex];
+        auto const &aligningTrajectory = bodyTrajectories[aligningBodyIndex];
+        return {model.rotation, trajectory, aligningTrajectory};
     }
 
     size_t numBodies() const {

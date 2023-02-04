@@ -7,6 +7,26 @@ template <class T>
 struct Optional {
     std::optional<T> o;
 
+    operator bool() const {
+        return o.has_value();
+    }
+
+    T const &operator*() const {
+        return *o;
+    }
+
+    T &operator*() {
+        return *o;
+    }
+
+    T const *operator->() const {
+        return o.operator->();
+    }
+
+    T *operator->() {
+        return o.operator->();
+    }
+
     template <class F, class = std::enable_if_t<!std::is_void_v<std::invoke_result_t<F, T>>>>
     Optional<std::invoke_result_t<F, T>> operator&(F const &f) const {
         if (o) return {f(*o)};
@@ -33,6 +53,8 @@ struct Optional {
 
     Optional(T t) : o(std::move(t)) {
     }
+
+    Optional() = default;
 
     Optional(std::nullopt_t) : o(std::nullopt) {
     }

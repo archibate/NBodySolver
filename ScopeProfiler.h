@@ -15,7 +15,7 @@ public:
 
     ~ScopeProfiler() {
         double dt = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now() - last).count();
-        std::cout << name << ':' << dt << "s" << std::endl;
+        std::cout << name << " takes " << dt << "s" << std::endl;
     }
 };
 

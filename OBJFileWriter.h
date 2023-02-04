@@ -9,6 +9,10 @@ struct OBJFileWriter {
     std::unique_ptr<std::ostream> oss;
     size_t vertCount = 0;
 
+    void addComment(const char *msg) {
+        *oss << '#' << msg << '\n';
+    }
+
     void addCurve(std::vector<Vector3<Real>> const &points, Real scale) {
         size_t vertBase = vertCount;
         for (auto const &p: points) {
