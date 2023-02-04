@@ -6,10 +6,10 @@
 #include <cassert>
 #include "Optional.h"
 #include "MathUtils.h"
+#include "Vector3.h"
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
-#include "SphericalCoordinate.h"
 
 // 参考系转动部分
 struct FrameRotation {

@@ -3,7 +3,7 @@
 #include <string>
 #include "MathUtils.h"
 
-// 格里高利历日期和儒略日数转换
+// 格里高利历日期与儒略日数相互转换
 // https://www.fourmilab.ch/documents/calendar/
 struct GregorianDate {
     // 年 [0,inf)
@@ -71,7 +71,7 @@ struct GregorianTime : GregorianDate {
     // 秒 [0,60)
     int second = 0;
     // 秒的非整数部分 [0,1)
-    Real extraSeconds = 0.0;
+    Real subSecond = 0.0;
 
     // 儒略日数转日期+时间
     static GregorianTime fromJulianDays(JulianDays instant) {
@@ -87,7 +87,7 @@ struct GregorianTime : GregorianDate {
     // 日期+时间转儒略日数
     JulianDays toJulianDays() const {
         JulianDays baseJd = GregorianDate::toJulianDays();
-        return baseJd + (((second + extraSeconds) / 60.0 + minute) / 60.0 + hour) / 24.0;
+        return baseJd + (((second + subSecond) / 60.0 + minute) / 60.0 + hour) / 24.0;
     }
 
     // 用字符串表示
@@ -96,6 +96,36 @@ struct GregorianTime : GregorianDate {
             + " " + std::to_string(hour + 100).substr(1)
             + ":" + std::to_string(minute + 100).substr(1)
             + ":" + std::to_string(second + 100).substr(1)
-            + "." + std::to_string((int)std::floor(extraSeconds * 1000) + 10000).substr(1);
+            + "." + std::to_string((int)std::floor(subSecond * 1000) + 1000).substr(1);
+    }
+};
+
+// 角度的不同表示法之间转换
+struct AngleInDegrees {
+    Degrees angle;
+
+    Real toRadians() const {
+        return angle * kDegrees;
+    }
+
+    static AngleInDegrees fromRadians(Real angleRadians) {
+        return {angleRadians / kDegrees};
+    }
+
+    // 用字符串表示（度,分,秒）
+    std::string toString() const {
+        int degree = (int)std::floor(angle);
+        int minute = (int)std::floor((angle - degree) * 60.0);
+        int second = (int)std::floor(((angle - degree) * 60.0 - minute) * 60.0);
+        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "″";
+    }
+
+    // 用字符串表示（时角,分,秒）
+    std::string toStringAsHourAngle() const {
+        Real factor = angle / 360.0;
+        int hour = (int)std::floor(factor * 24.0);
+        int minute = (int)std::floor((factor * 24.0 - hour) * 60.0);
+        int second = (int)std::floor(((factor * 24.0 - hour) * 60.0 - minute) * 60.0);
+        return std::to_string(hour) + "h" + std::to_string(minute) + "m" + std::to_string(second) + "s";
     }
 };

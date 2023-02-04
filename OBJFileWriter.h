@@ -4,6 +4,7 @@
 #include <ostream>
 #include <memory>
 #include "MathUtils.h"
+#include "Vector3.h"
 
 struct OBJFileWriter {
     std::unique_ptr<std::ostream> oss;
