@@ -9,6 +9,7 @@
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
+#include "SphericalCoordinate.h"
 
 // 参考系转动部分
 struct FrameRotation {
@@ -24,8 +25,14 @@ struct FrameRotation {
     Degrees axisDeclination = 90.0;
 
     // 从指定Z方向和X方向生成自转轴向
-    static FrameRotation fromDirectionAndTangent(Vector3<Real> const &direction, Vector3<Real> const &tangent) {
-        FrameRotation ret{};
+    static FrameRotation fromDirectionAndTangent(Vector3<Real> const &direction, Vector3<Real> const &tangent, JulianDays instant) {
+        auto directionSC = SphericalCoordinate::fromCartesian(direction);
+        auto bitangent = tangent.cross(direction);
+        FrameRotation ret;
+        ret.axisRightAscension = directionSC.rightAscension;
+        ret.axisDeclination = directionSC.declination;
+        ret.referenceInstant = instant;
+        ret.angularFrequency = 1;
         return ret;
     }
 
@@ -191,7 +198,7 @@ struct ReferenceFrame {
             auto aligningVelocity = aligningTrajectory->velocityAtInstant(instant);
             auto aligningDirection = aligningPosition - bodyPosition;
             auto aligningTangent = aligningVelocity - bodyVelocity;
-            auto aligningRotation = FrameRotation::fromDirectionAndTangent(aligningDirection, aligningTangent);
+            auto aligningRotation = FrameRotation::fromDirectionAndTangent(aligningDirection, aligningTangent, instant);
             return aligningRotation;
         } else {
             return rotation;
@@ -202,9 +209,7 @@ struct ReferenceFrame {
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
         auto bodyVelocity = trajectory.velocityAtInstant(instant);
-        position.x -= bodyPosition.x;
-        position.y -= bodyPosition.y;
-        position.z -= bodyPosition.z;
+        position -= bodyPosition;
         getRotation(instant, bodyPosition, bodyVelocity).worldToLocal(position, instant);
     }
 
@@ -213,18 +218,14 @@ struct ReferenceFrame {
         auto bodyPosition = trajectory.positionAtInstant(instant);
         auto bodyVelocity = trajectory.velocityAtInstant(instant);
         getRotation(instant, bodyPosition, bodyVelocity).localToWorld(position, instant);
-        position.x += bodyPosition.x;
-        position.y += bodyPosition.y;
-        position.z += bodyPosition.z;
+        position += bodyPosition;
     }
 
     // 把指定瞬间时的速度矢量从世界坐标系转换到自转坐标系
     void worldToLocalVelocity(Vector3<KilometersPerSecond> &velocity, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
         auto bodyVelocity = trajectory.velocityAtInstant(instant);
-        velocity.x -= bodyVelocity.x;
-        velocity.y -= bodyVelocity.y;
-        velocity.z -= bodyVelocity.z;
+        velocity -= bodyVelocity;
         getRotation(instant, bodyPosition, bodyVelocity).worldToLocalVelocity(velocity, instant);
     }
 
@@ -233,9 +234,7 @@ struct ReferenceFrame {
         auto bodyPosition = trajectory.positionAtInstant(instant);
         auto bodyVelocity = trajectory.velocityAtInstant(instant);
         getRotation(instant, bodyPosition, bodyVelocity).localToWorldVelocity(velocity, instant);
-        velocity.x += bodyVelocity.x;
-        velocity.y += bodyVelocity.y;
-        velocity.z += bodyVelocity.z;
+        velocity += bodyVelocity;
     }
 
     // 把轨迹从世界坐标系转换到自转坐标系
@@ -283,11 +282,8 @@ struct BodyGravityModel {
 
     // 指定中心天体（以本引力模型）位置对指定探针位置处的引力加速度
     Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> const &bodyPosition, Vector3<Kilometers> const &positionQuery) const {
-        Vector3<Kilometers> delta;
-        delta.x = bodyPosition.x - positionQuery.x;
-        delta.y = bodyPosition.y - positionQuery.y;
-        delta.z = bodyPosition.z - positionQuery.z;
-        Real distanceSquared = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+        Vector3<Kilometers> delta = bodyPosition - positionQuery;
+        Real distanceSquared = delta.lengthSquared();
         Real referenceRadiusSquared = referenceRadius * referenceRadius;
         if (distanceSquared < referenceRadiusSquared) {
             distanceSquared = referenceRadiusSquared;
@@ -296,9 +292,7 @@ struct BodyGravityModel {
         Real distanceCubed = distanceSquared * distance;
         Real gravityScale = gravitationalParameter / distanceCubed;
         Vector3<KilometersPerSecond2> acceleration;
-        acceleration.x = delta.x * gravityScale;
-        acceleration.y = delta.y * gravityScale;
-        acceleration.z = delta.z * gravityScale;
+        acceleration = delta * gravityScale;
         return acceleration;
     }
 };
@@ -372,9 +366,7 @@ struct SystemGravityModel {
         Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
         for (size_t i = 0; i < bodyPositions.size(); i++) {
             auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], positionQuery);
-            acceleration.x += accelI.x;
-            acceleration.y += accelI.y;
-            acceleration.z += accelI.z;
+            acceleration += accelI;
         }
         return acceleration;
     }
@@ -386,9 +378,7 @@ struct SystemGravityModel {
         for (size_t i = 0; i < bodyPositions.size(); i++) {
             if (i == indexQuery) continue;
             auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], bodyPositions[indexQuery]);
-            acceleration.x += accelI.x;
-            acceleration.y += accelI.y;
-            acceleration.z += accelI.z;
+            acceleration += accelI;
         }
         return acceleration;
     }

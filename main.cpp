@@ -28,18 +28,19 @@ void finish() {
     OBJFileWriter obj{FileContentIO("/tmp/solarSystem.obj").writeStream()};
 
     ReferenceFrame frame;
-    frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
+    //frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
+    frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
 
     obj.addComment("SolarSystem 1:149597870700");
     for (size_t i = 0; i < solarSystem.numBodies(); i++) {
         if (1
             && i != solarSystem.getBodyIndexByName("Sun")
-            && i != solarSystem.getBodyIndexByName("Moon")
-            && i != solarSystem.getBodyIndexByName("Mercury")
-            && i != solarSystem.getBodyIndexByName("Venus")
-            && i != solarSystem.getBodyIndexByName("Mars")
-            && i != solarSystem.getBodyIndexByName("Jupiter")
-            && i != solarSystem.getBodyIndexByName("Saturn")
+            //&& i != solarSystem.getBodyIndexByName("Moon")
+            //&& i != solarSystem.getBodyIndexByName("Mercury")
+            //&& i != solarSystem.getBodyIndexByName("Venus")
+            //&& i != solarSystem.getBodyIndexByName("Mars")
+            //&& i != solarSystem.getBodyIndexByName("Jupiter")
+            //&& i != solarSystem.getBodyIndexByName("Saturn")
             ) continue;
         auto trajectory = solarSystem.getBodyTrajectory(i);
         trajectory.resampleDensity(24.0 / 24.0); // 24 hours per OBJ point
@@ -54,7 +55,7 @@ int main() {
 
     solarSystem.takeSnapshot();
     std::cout << "solving " << solarSystem.numBodies() << " bodies\n";
-    const JulianDays maxTime = 20.0 * 365.0; // simulate for 20 years
+    const JulianDays maxTime = 1.0 * 365.0; // simulate for 1 year
     const Seconds dt = 5 * 60.0; // 5 minutes per step
     const size_t numSubSteps = 4; // 20 minutes per snapshot
     const size_t maxI = (size_t)std::ceil(maxTime * 86400.0 / (numSubSteps * dt));
