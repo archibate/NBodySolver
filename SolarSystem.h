@@ -51,7 +51,10 @@ struct FrameRotation {
 
     // 把指定瞬间时的位置坐标从世界坐标系转换到自转坐标系
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
-        {
+        auto axis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
+        position.transformIntoZAxis(axis);
+        position.rotateByZ(-angleAtInstant(instant));
+        /*{
             auto cosRA = std::cos(axisRightAscension * kDegrees);
             auto sinRA = -std::sin(axisRightAscension * kDegrees);
             auto newX = position.x * cosRA + position.y * sinRA;
@@ -75,12 +78,15 @@ struct FrameRotation {
             auto newY = position.y * cosAngle - position.x * sinAngle;
             position.x = newX;
             position.y = newY;
-        }
+        }*/
     }
 
     // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
-        {
+        auto axis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
+        position.transformFromZAxis(axis);
+        position.rotateByZ(angleAtInstant(instant));
+        /*{
             Degrees angle = angleAtInstant(instant);
             auto cosAngle = std::cos(angle * kDegrees);
             auto sinAngle = std::sin(angle * kDegrees);
@@ -104,7 +110,7 @@ struct FrameRotation {
             auto newY = position.y * cosRA - position.x * sinRA;
             position.x = newX;
             position.y = newY;
-        }
+        }*/
     }
 
     // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系

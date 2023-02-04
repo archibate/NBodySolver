@@ -219,18 +219,36 @@ struct Vector3 {
         return *this;
     }
 
-    // 如果sign为+1，则从以指定矢量为轴的坐标系中转换回世界坐标系(localToWorld)
-    // 如果sign为-1，则从世界坐标系转换到以指定矢量为轴的坐标系中去(worldToLocal)
-    Vector3 &resetZAxis(Vector3 const &axis, T sign = T(1)) {
+    // 从以指定矢量为轴的坐标系中转换回世界坐标系(localToWorld)
+    Vector3 &transformFromZAxis(Vector3 const &axis, T sign = T(1)) {
         auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
         auto lenXY = std::sqrt(lenXY2);
+        auto sinDec = axis.z / lenXY;
+        auto cosDec = std::sqrt(1 - axis.z * axis.z / lenXY2);
+        auto tmp1 = z * sinDec + y * cosDec;
+        auto tmp2 = y * sinDec - z * cosDec;
+        z = tmp1;
+        y = tmp2;
         auto sinRA = sign * axis.y / lenXY;
+        auto cosRA = axis.x / lenXY;
+        tmp1 = x * cosRA + y * sinRA;
+        tmp2 = y * cosRA - x * sinRA;
+        x = tmp1;
+        y = tmp2;
+        return *this;
+    }
+
+    // 从世界坐标系转换到以指定矢量为轴的坐标系中去(worldToLocal)
+    Vector3 &transformIntoZAxis(Vector3 const &axis, T sign = T(-1)) {
+        auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
+        auto lenXY = std::sqrt(lenXY2);
+        auto sinRA = -axis.y / lenXY;
         auto cosRA = axis.x / lenXY;
         auto tmp1 = x * cosRA + y * sinRA;
         auto tmp2 = y * cosRA - x * sinRA;
         x = tmp1;
         y = tmp2;
-        auto sinDec = axis.z / lenXY;
+        auto sinDec = -axis.z / lenXY;
         auto cosDec = std::sqrt(1 - axis.z * axis.z / lenXY2);
         tmp1 = z * sinDec + y * cosDec;
         tmp2 = y * sinDec - z * cosDec;
@@ -274,9 +292,9 @@ struct Vector3 {
 
     // 沿指定轴向旋转一定角度（度）
     Vector3 &rotateByAxis(Vector3 const &axis, Degrees angle) {
-        resetZAxis(axis, T(-1));  // 从 axis 为 Z 轴到真 Z 轴
-        rotateByZ(angle);         // 绕真 Z 轴旋转 angle 度
-        resetZAxis(axis, T(1));   // 从真 Z 轴到 axis 为 Z 轴
+        transformFromZAxis(axis);  // 从 axis 为 Z 轴到真 Z 轴
+        rotateByZ(angle);          // 绕真 Z 轴旋转 angle 度
+        transformIntoZAxis(axis);  // 从真 Z 轴到 axis 为 Z 轴
     }
 
     // 深拷贝本矢量
