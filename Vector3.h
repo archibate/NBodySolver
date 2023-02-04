@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MathUtils.h"
+#include "DebugHelper.h"
 
 template <class T>
 struct Vector3 {
@@ -26,19 +27,21 @@ struct Vector3 {
         return v * t;
     }
 
-    Vector3 operator+=(Vector3 const &v) const {
+    Vector3 &operator+=(Vector3 const &v) {
         x += v.x;
         y += v.y;
-        y += v.z;
+        z += v.z;
+        return *this;
     }
 
-    Vector3 operator-=(Vector3 const &v) const {
+    Vector3 &operator-=(Vector3 const &v) {
         x -= v.x;
         y -= v.y;
-        y -= v.z;
+        z -= v.z;
+        return *this;
     }
 
-    Vector3 operator*=(T t) const {
+    Vector3 &operator*=(T t) {
         x *= t;
         y *= t;
         z *= t;
@@ -170,12 +173,12 @@ struct Vector3 {
 
     // 赤纬（度），以 Z 轴正方向为北天极
     Degrees declination() const {
-        return std::asin(z / std::sqrt(x * x + y * y)) * kDegrees;
+        return std::atan2(z, std::sqrt(x * x + y * y)) / kDegrees;
     }
 
     // 赤经（度），以 X 轴正方向为0°度经线
     Degrees rightAscension() const {
-        return std::atan2(y, x) * kDegrees;
+        return std::atan2(y, x) / kDegrees;
     }
 
     // 旋转到新的赤纬（度），保持赤经和长度不变
@@ -199,50 +202,58 @@ struct Vector3 {
         return *this;
     }
 
-    // 从以指定矢量为轴的坐标系中转换回世界坐标系(localToWorld)
-    Vector3 &transformFromZAxis(Vector3 const &axis, T sign = T(1)) {
-        auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
-        auto lenXY = std::sqrt(lenXY2);
-        auto sinDec = axis.z / lenXY;
-        auto cosDec = std::sqrt(1 - axis.z * axis.z / lenXY2);
-        auto tmp1 = z * sinDec + y * cosDec;
-        auto tmp2 = y * sinDec - z * cosDec;
-        z = tmp1;
-        y = tmp2;
-        auto sinRA = sign * axis.y / lenXY;
-        auto cosRA = axis.x / lenXY;
-        tmp1 = x * cosRA + y * sinRA;
-        tmp2 = y * cosRA - x * sinRA;
-        x = tmp1;
-        y = tmp2;
-        return *this;
-    }
+    //// 从以指定矢量为轴的坐标系中转换回世界坐标系(localToWorld)
+    //Vector3 &moveZAxisFrom(Vector3 const &axis) {
+        //auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
+        //auto lenXYZ2 = lenXY2 + axis.z * axis.z;
+        //auto lenXY = std::sqrt(lenXY2);
+        //auto lenXYInv = lenXY != T(0) ? 1.0 / lenXY : 0.0;
+        //auto lenXYZ = std::sqrt(lenXYZ2);
+        //auto lenXYZInv = lenXYZ != T(0) ? 1.0 / lenXYZ : 0.0;
+        //auto sinDec = axis.z * lenXYZInv;
+        //auto cosDec = lenXY * lenXYZInv;
+        //auto sinRA = axis.y * lenXYInv;
+        //auto cosRA = lenXY != T(0) ? axis.x * lenXYInv : 1.0;
+        //auto tmp1 = z * sinDec - y * cosDec;
+        //auto tmp2 = y * sinDec + z * cosDec;
+        //z = tmp1;
+        //y = tmp2;
+        //tmp1 = x * cosRA + y * sinRA;
+        //tmp2 = y * cosRA - x * sinRA;
+        //x = tmp1;
+        //y = tmp2;
+        //return *this;
+    //}
 
-    // 从世界坐标系转换到以指定矢量为轴的坐标系中去(worldToLocal)
-    Vector3 &transformIntoZAxis(Vector3 const &axis, T sign = T(-1)) {
-        auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
-        auto lenXY = std::sqrt(lenXY2);
-        auto sinRA = -axis.y / lenXY;
-        auto cosRA = axis.x / lenXY;
-        auto tmp1 = x * cosRA + y * sinRA;
-        auto tmp2 = y * cosRA - x * sinRA;
-        x = tmp1;
-        y = tmp2;
-        auto sinDec = -axis.z / lenXY;
-        auto cosDec = std::sqrt(1 - axis.z * axis.z / lenXY2);
-        tmp1 = z * sinDec + y * cosDec;
-        tmp2 = y * sinDec - z * cosDec;
-        z = tmp1;
-        y = tmp2;
-        return *this;
-    }
+    //// 从世界坐标系转换到以指定矢量为轴的坐标系中去(worldToLocal)
+    //Vector3 &moveZAxisTo(Vector3 const &axis) {
+        //auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
+        //auto lenXYZ2 = lenXY2 + axis.z * axis.z;
+        //auto lenXY = std::sqrt(lenXY2);
+        //auto lenXYInv = lenXY != T(0) ? 1.0 / lenXY : 0.0;
+        //auto lenXYZ = std::sqrt(lenXYZ2);
+        //auto lenXYZInv = lenXYZ != T(0) ? 1.0 / lenXYZ : 0.0;
+        //auto sinDec = axis.z * lenXYZInv;
+        //auto cosDec = -lenXY * lenXYZInv;
+        //auto sinRA = -axis.y * lenXYInv;
+        //auto cosRA = lenXY != T(0) ? axis.x * lenXYInv : 1.0;
+        //auto tmp1 = x * cosRA + y * sinRA;
+        //auto tmp2 = y * cosRA - x * sinRA;
+        //x = tmp1;
+        //y = tmp2;
+        //tmp1 = z * sinDec - y * cosDec;
+        //tmp2 = y * sinDec + z * cosDec;
+        //z = tmp1;
+        //y = tmp2;
+        //return *this;
+    //}
 
     // 沿X轴正方向旋转一定角度（度）
     Vector3 &rotateByX(Degrees angle) {
         auto cosAngle = std::cos(angle * kDegrees);
         auto sinAngle = std::sin(angle * kDegrees);
-        auto tmp1 = y * cosAngle + z * sinAngle;
-        auto tmp2 = z * cosAngle - y * sinAngle;
+        auto tmp1 = y * cosAngle - z * sinAngle;
+        auto tmp2 = z * cosAngle + y * sinAngle;
         y = tmp1;
         z = tmp2;
         return *this;
@@ -252,8 +263,8 @@ struct Vector3 {
     Vector3 &rotateByY(Degrees angle) {
         auto cosAngle = std::cos(angle * kDegrees);
         auto sinAngle = std::sin(angle * kDegrees);
-        auto tmp1 = z * cosAngle + x * sinAngle;
-        auto tmp2 = x * cosAngle - z * sinAngle;
+        auto tmp1 = z * cosAngle - x * sinAngle;
+        auto tmp2 = x * cosAngle + z * sinAngle;
         z = tmp1;
         x = tmp2;
         return *this;
@@ -263,19 +274,20 @@ struct Vector3 {
     Vector3 &rotateByZ(Degrees angle) {
         auto cosAngle = std::cos(angle * kDegrees);
         auto sinAngle = std::sin(angle * kDegrees);
-        auto tmp1 = x * cosAngle + y * sinAngle;
-        auto tmp2 = y * cosAngle - x * sinAngle;
+        auto tmp1 = x * cosAngle - y * sinAngle;
+        auto tmp2 = y * cosAngle + x * sinAngle;
         x = tmp1;
         y = tmp2;
         return *this;
     }
 
-    // 沿指定轴向旋转一定角度（度）
-    Vector3 &rotateByAxis(Vector3 const &axis, Degrees angle) {
-        transformFromZAxis(axis);  // 从 axis 为 Z 轴到真 Z 轴
-        rotateByZ(angle);          // 绕真 Z 轴旋转 angle 度
-        transformIntoZAxis(axis);  // 从真 Z 轴到 axis 为 Z 轴
-    }
+    //// 沿指定轴向旋转一定角度（度）
+    //Vector3 &rotateByAxis(Vector3 const &axis, Degrees angle) {
+        //moveZAxisFrom(axis); // 从 axis 为 Z 轴到真 Z 轴
+        //rotateByZ(angle);    // 绕真 Z 轴旋转 angle 度
+        //moveZAxisTo(axis);   // 从真 Z 轴到 axis 为 Z 轴
+        //return *this;
+    //}
 
     // 深拷贝本矢量
     Vector3 deepCopy() const {

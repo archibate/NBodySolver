@@ -28,6 +28,7 @@ void finish() {
     OBJFileWriter obj{FileContentIO("/tmp/solarSystem.obj").writeStream()};
 
     ReferenceFrame frame;
+    //frame = solarSystem.getBodyInertialReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
     //frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
     frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
 
@@ -50,6 +51,15 @@ void finish() {
 }
 
 int main() {
+    //Vector3<Real> v;
+    //v = {std::sqrt(2), std::sqrt(2), 2};
+    //std::cout << v.declination() << std::endl;
+    //std::cout << v.rightAscension() << std::endl;
+    //v.rotateByAxis({0, 0, 1}, 30.0);
+    //std::cout << v.declination() << std::endl;
+    //std::cout << v.rightAscension() << std::endl;
+    //return 0;
+
     DefScopeProfiler;
     init();
 

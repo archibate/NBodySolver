@@ -10,6 +10,7 @@
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
+#include "DebugHelper.h"
 
 // 参考系转动部分
 struct FrameRotation {
@@ -26,13 +27,15 @@ struct FrameRotation {
 
     // 从指定Z方向和X方向生成自转轴向
     static FrameRotation fromDirectionAndTangent(Vector3<Real> const &direction, Vector3<Real> const &tangent, JulianDays instant) {
-        auto directionSC = SphericalCoordinate::fromCartesian(direction);
-        auto bitangent = tangent.cross(direction);
+        //auto bitangent = tangent.cross(direction);
         FrameRotation ret;
-        ret.axisRightAscension = directionSC.rightAscension;
-        ret.axisDeclination = directionSC.declination;
+        ret.axisDeclination = direction.declination();
+        ret.axisRightAscension = direction.rightAscension();
+        SHOW(ret.axisDeclination);
+        SHOW(ret.axisRightAscension);
         ret.referenceInstant = instant;
-        ret.angularFrequency = 1;
+        ret.toInertial();
+        //ret.angularFrequency = 0; // todo
         return ret;
     }
 
@@ -51,66 +54,71 @@ struct FrameRotation {
 
     // 把指定瞬间时的位置坐标从世界坐标系转换到自转坐标系
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
-        auto axis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
-        position.transformIntoZAxis(axis);
+        //auto axis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
+        //position.moveZAxisFrom(axis);
+        position.rotateByZ(-axisRightAscension);
+        position.rotateByY(axisDeclination - 90.0);
         position.rotateByZ(-angleAtInstant(instant));
-        /*{
-            auto cosRA = std::cos(axisRightAscension * kDegrees);
-            auto sinRA = -std::sin(axisRightAscension * kDegrees);
-            auto newX = position.x * cosRA + position.y * sinRA;
-            auto newY = position.y * cosRA - position.x * sinRA;
-            position.x = newX;
-            position.y = newY;
-        }
-        {
-            auto cosDec = std::cos(axisDeclination * kDegrees);
-            auto sinDec = -std::sin(axisDeclination * kDegrees);
-            auto newZ = position.z * sinDec + position.y * cosDec;
-            auto newY = position.y * sinDec - position.z * cosDec;
-            position.z = newZ;
-            position.y = newY;
-        }
-        {
-            Degrees angle = angleAtInstant(instant);
-            auto cosAngle = std::cos(angle * kDegrees);
-            auto sinAngle = -std::sin(angle * kDegrees);
-            auto newX = position.x * cosAngle + position.y * sinAngle;
-            auto newY = position.y * cosAngle - position.x * sinAngle;
-            position.x = newX;
-            position.y = newY;
-        }*/
+        //position.rotateByZ(angleAtInstant(instant));
+        //position.rotateByX(axisDeclination - 90.0);
+        //position.rotateByZ(-axisRightAscension);
+        //{
+            //auto cosRA = std::cos(axisRightAscension * kDegrees);
+            //auto sinRA = -std::sin(axisRightAscension * kDegrees);
+            //auto newX = position.x * cosRA + position.y * sinRA;
+            //auto newY = position.y * cosRA - position.x * sinRA;
+            //position.x = newX;
+            //position.y = newY;
+        //}
+        //{
+            //auto cosDec = std::cos(axisDeclination * kDegrees);
+            //auto sinDec = -std::sin(axisDeclination * kDegrees);
+            //auto newZ = position.z * sinDec + position.y * cosDec;
+            //auto newY = position.y * sinDec - position.z * cosDec;
+            //position.z = newZ;
+            //position.y = newY;
+        //}
+        //{
+            //Degrees angle = angleAtInstant(instant);
+            //auto cosAngle = std::cos(angle * kDegrees);
+            //auto sinAngle = -std::sin(angle * kDegrees);
+            //auto newX = position.x * cosAngle + position.y * sinAngle;
+            //auto newY = position.y * cosAngle - position.x * sinAngle;
+            //position.x = newX;
+            //position.y = newY;
+        //}
     }
 
     // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
-        auto axis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
-        position.transformFromZAxis(axis);
         position.rotateByZ(angleAtInstant(instant));
-        /*{
-            Degrees angle = angleAtInstant(instant);
-            auto cosAngle = std::cos(angle * kDegrees);
-            auto sinAngle = std::sin(angle * kDegrees);
-            auto newX = position.x * cosAngle + position.y * sinAngle;
-            auto newY = position.y * cosAngle - position.x * sinAngle;
-            position.x = newX;
-            position.y = newY;
-        }
-        {
-            auto cosDec = std::cos(axisDeclination * kDegrees);
-            auto sinDec = std::sin(axisDeclination * kDegrees);
-            auto newZ = position.z * sinDec + position.y * cosDec;
-            auto newY = position.y * sinDec - position.z * cosDec;
-            position.z = newZ;
-            position.y = newY;
-        }
-        {
-            auto cosRA = std::cos(axisRightAscension * kDegrees);
-            auto sinRA = std::sin(axisRightAscension * kDegrees);
-            auto newX = position.x * cosRA + position.y * sinRA;
-            auto newY = position.y * cosRA - position.x * sinRA;
-            position.x = newX;
-            position.y = newY;
-        }*/
+        position.rotateByY(90.0 - axisDeclination);
+        position.rotateByZ(axisRightAscension);
+        //{
+            //Degrees angle = angleAtInstant(instant);
+            //auto cosAngle = std::cos(angle * kDegrees);
+            //auto sinAngle = std::sin(angle * kDegrees);
+            //auto newX = position.x * cosAngle + position.y * sinAngle;
+            //auto newY = position.y * cosAngle - position.x * sinAngle;
+            //position.x = newX;
+            //position.y = newY;
+        //}
+        //{
+            //auto cosDec = std::cos(axisDeclination * kDegrees);
+            //auto sinDec = std::sin(axisDeclination * kDegrees);
+            //auto newZ = position.z * sinDec + position.y * cosDec;
+            //auto newY = position.y * sinDec - position.z * cosDec;
+            //position.z = newZ;
+            //position.y = newY;
+        //}
+        //{
+            //auto cosRA = std::cos(axisRightAscension * kDegrees);
+            //auto sinRA = std::sin(axisRightAscension * kDegrees);
+            //auto newX = position.x * cosRA + position.y * sinRA;
+            //auto newY = position.y * cosRA - position.x * sinRA;
+            //position.x = newX;
+            //position.y = newY;
+        //}
     }
 
     // 把指定瞬间时的速度矢量从自转坐标系转换到世界坐标系
