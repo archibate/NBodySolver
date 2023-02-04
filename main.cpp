@@ -29,8 +29,8 @@ void finish() {
 
     ReferenceFrame frame;
     //frame = solarSystem.getBodyInertialReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
-    //frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
-    frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
+    frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
+    //frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
 
     obj.addComment("SolarSystem 1:149597870700");
     for (size_t i = 0; i < solarSystem.numBodies(); i++) {

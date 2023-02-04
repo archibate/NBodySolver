@@ -202,52 +202,6 @@ struct Vector3 {
         return *this;
     }
 
-    //// 从以指定矢量为轴的坐标系中转换回世界坐标系(localToWorld)
-    //Vector3 &moveZAxisFrom(Vector3 const &axis) {
-        //auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
-        //auto lenXYZ2 = lenXY2 + axis.z * axis.z;
-        //auto lenXY = std::sqrt(lenXY2);
-        //auto lenXYInv = lenXY != T(0) ? 1.0 / lenXY : 0.0;
-        //auto lenXYZ = std::sqrt(lenXYZ2);
-        //auto lenXYZInv = lenXYZ != T(0) ? 1.0 / lenXYZ : 0.0;
-        //auto sinDec = axis.z * lenXYZInv;
-        //auto cosDec = lenXY * lenXYZInv;
-        //auto sinRA = axis.y * lenXYInv;
-        //auto cosRA = lenXY != T(0) ? axis.x * lenXYInv : 1.0;
-        //auto tmp1 = z * sinDec - y * cosDec;
-        //auto tmp2 = y * sinDec + z * cosDec;
-        //z = tmp1;
-        //y = tmp2;
-        //tmp1 = x * cosRA + y * sinRA;
-        //tmp2 = y * cosRA - x * sinRA;
-        //x = tmp1;
-        //y = tmp2;
-        //return *this;
-    //}
-
-    //// 从世界坐标系转换到以指定矢量为轴的坐标系中去(worldToLocal)
-    //Vector3 &moveZAxisTo(Vector3 const &axis) {
-        //auto lenXY2 = axis.x * axis.x + axis.y * axis.y;
-        //auto lenXYZ2 = lenXY2 + axis.z * axis.z;
-        //auto lenXY = std::sqrt(lenXY2);
-        //auto lenXYInv = lenXY != T(0) ? 1.0 / lenXY : 0.0;
-        //auto lenXYZ = std::sqrt(lenXYZ2);
-        //auto lenXYZInv = lenXYZ != T(0) ? 1.0 / lenXYZ : 0.0;
-        //auto sinDec = axis.z * lenXYZInv;
-        //auto cosDec = -lenXY * lenXYZInv;
-        //auto sinRA = -axis.y * lenXYInv;
-        //auto cosRA = lenXY != T(0) ? axis.x * lenXYInv : 1.0;
-        //auto tmp1 = x * cosRA + y * sinRA;
-        //auto tmp2 = y * cosRA - x * sinRA;
-        //x = tmp1;
-        //y = tmp2;
-        //tmp1 = z * sinDec - y * cosDec;
-        //tmp2 = y * sinDec + z * cosDec;
-        //z = tmp1;
-        //y = tmp2;
-        //return *this;
-    //}
-
     // 沿X轴正方向旋转一定角度（度）
     Vector3 &rotateByX(Degrees angle) {
         auto cosAngle = std::cos(angle * kDegrees);
@@ -281,13 +235,18 @@ struct Vector3 {
         return *this;
     }
 
-    //// 沿指定轴向旋转一定角度（度）
-    //Vector3 &rotateByAxis(Vector3 const &axis, Degrees angle) {
-        //moveZAxisFrom(axis); // 从 axis 为 Z 轴到真 Z 轴
-        //rotateByZ(angle);    // 绕真 Z 轴旋转 angle 度
-        //moveZAxisTo(axis);   // 从真 Z 轴到 axis 为 Z 轴
-        //return *this;
-    //}
+    // 沿指定轴向旋转一定角度（度）
+    Vector3 &rotateByAxis(Vector3 const &axis, Degrees angle) {
+        // 从 axis 到 Z 轴
+        rotateByZ(-axis.rightAscension());
+        rotateByY(axis.declination() - 90.0);
+        // 绕 Z 轴旋转 angle 度
+        rotateByZ(angle);
+        // 从 Z 轴到 axis
+        rotateByY(90.0 - axis.declination());
+        rotateByZ(axis.rightAscension());
+        return *this;
+    }
 
     // 深拷贝本矢量
     Vector3 deepCopy() const {
