@@ -25,11 +25,11 @@ struct GregorianDate {
         Real wjd = std::floor(jd - 0.5) + 0.5;
         Real depoch = wjd - 1721425.5;
         Real quadricent = std::floor(depoch / 146097);
-        Real dqc = std::fmod(depoch, 146097);
+        Real dqc = floorMod(depoch, 146097);
         Real cent = std::floor(dqc / 36524);
-        Real dcent = std::fmod(dqc, 36524);
+        Real dcent = floorMod(dqc, 36524);
         Real quad = std::floor(dcent / 1461);
-        Real dquad = std::fmod(dcent, 1461);
+        Real dquad = floorMod(dcent, 1461);
         Real yindex = std::floor(dquad / 365);
         int year = (int)std::rint((quadricent * 400) + (cent * 100) + (quad * 4) + yindex);
         if (!((cent == 4) || (yindex == 4))) {
@@ -76,7 +76,7 @@ struct GregorianTime : GregorianDate {
     // 儒略日数转日期+时间
     static GregorianTime fromJulianDays(JulianDays instant) {
         auto date = GregorianDate::fromJulianDays(instant);
-        JulianDays offset = instant - std::floor(instant);
+        JulianDays offset = instant - std::floor(instant - 0.5) - 0.5;
         int hour = (int)std::floor(offset * 24.0);
         int minute = (int)std::floor((offset * 24.0 - hour) * 60.0);
         int second = (int)std::floor(((offset * 24.0 - hour) * 60.0 - minute) * 60.0);
@@ -112,20 +112,34 @@ struct AngleInDegrees {
         return {angleRadians / kDegrees};
     }
 
-    // 用字符串表示（度,分,秒）
+    // 用字符串表示（±度,分,秒）
     std::string toString() const {
-        int degree = (int)std::floor(angle);
-        int minute = (int)std::floor((angle - degree) * 60.0);
-        int second = (int)std::floor(((angle - degree) * 60.0 - minute) * 60.0);
-        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "″";
+        Real factor = std::abs(angle);
+        int degree = (int)std::floor(factor);
+        int minute = (int)std::floor((factor - degree) * 60.0);
+        int second = (int)std::floor(((factor - degree) * 60.0 - minute) * 60.0);
+        int subsec = (int)std::floor((((factor - degree) * 60.0 - minute) * 60.0 - second) * 10.0);
+        if (angle < 0.0) degree = -degree;
+        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "." + std::to_string(subsec) + "″";
+    }
+
+    // 用字符串表示（度,分,秒）
+    std::string toStringAs360() const {
+        Real factor = floorMod(angle, 360.0);
+        int degree = (int)std::floor(factor);
+        int minute = (int)std::floor((factor - degree) * 60.0);
+        int second = (int)std::floor(((factor - degree) * 60.0 - minute) * 60.0);
+        int subsec = (int)std::floor((((factor - degree) * 60.0 - minute) * 60.0 - second) * 100.0);
+        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "." + std::to_string(subsec + 100).substr(1) + "″";
     }
 
     // 用字符串表示（时角,分,秒）
     std::string toStringAsHourAngle() const {
-        Real factor = angle / 360.0;
-        int hour = (int)std::floor(factor * 24.0);
-        int minute = (int)std::floor((factor * 24.0 - hour) * 60.0);
-        int second = (int)std::floor(((factor * 24.0 - hour) * 60.0 - minute) * 60.0);
-        return std::to_string(hour) + "h" + std::to_string(minute) + "m" + std::to_string(second) + "s";
+        Real factor = floorMod(angle, 360.0) / 360.0 * 24.0;
+        int hour = (int)std::floor(factor);
+        int minute = (int)std::floor((factor - hour) * 60.0);
+        int second = (int)std::floor(((factor - hour) * 60.0 - minute) * 60.0);
+        int subsec = (int)std::floor((((factor - hour) * 60.0 - minute) * 60.0 - second) * 100.0);
+        return std::to_string(hour) + "h" + std::to_string(minute) + "m" + std::to_string(second) + "." + std::to_string(subsec + 100).substr(1) + "s";
     }
 };

@@ -24,14 +24,30 @@ struct FrameRotation {
     // 北极点赤纬（度）
     Degrees axisDeclination = 90.0;
 
-    // 从指定Z方向和X方向生成参考系转动
-    static FrameRotation fromDirection(Vector3<Real> const &direction, JulianDays instant) {
+    // 从指定北天极方向生成参考系转动部分
+    static FrameRotation fromDirection(Vector3<Real> const &direction) {
         FrameRotation ret;
         ret.axisDeclination = direction.declination();
         ret.axisRightAscension = direction.rightAscension();
-        ret.referenceInstant = instant;
-        ret.referenceAngle = 0;
-        ret.angularFrequency = 0;
+        ret.referenceInstant = 0.0;
+        ret.referenceAngle = 0.0;
+        ret.angularFrequency = 0.0;
+        return ret;
+    }
+
+    // 从指定天顶方向和北极方向生成参考系转动部分
+    static FrameRotation fromZenithAndNorth(Vector3<Real> const &zenith, Vector3<Real> const &north) {
+        FrameRotation ret;
+        ret.axisDeclination = zenith.declination();
+        ret.axisRightAscension = zenith.rightAscension();
+        ret.referenceInstant = 0.0;
+        ret.angularFrequency = 0.0;
+        Vector3<Real> nordir = north;
+        nordir.rotateByZ(-ret.axisRightAscension);
+        nordir.rotateByY(ret.axisDeclination - 90.0);
+        //SHOW(ret.axisDeclination);
+        //SHOW(ret.axisRightAscension);
+        ret.referenceAngle = nordir.rightAscension();
         return ret;
     }
 
@@ -61,6 +77,18 @@ struct FrameRotation {
         position.rotateByY(90.0 - axisDeclination);
         position.rotateByZ(axisRightAscension);
     }
+
+    //// 把另一个自转参考系从世界坐标系转换到自转坐标系
+    //void worldToLocal(FrameRotation &rotation) const {
+        //auto theirAxis = Vector3<Real>().fromSpherical(1.0, rotation.axisDeclination, rotation.axisRightAscension);
+        //auto ourAxis = Vector3<Real>().fromSpherical(1.0, axisDeclination, axisRightAscension);
+        //auto newFrequency = theirAxis * rotation.angularFrequency + ourAxis * angularFrequency;
+        //auto newRefAngle = theirAxis * rotation.angleAtInstant(referenceInstant) + ourAxis * referenceAngle;
+    //}
+
+    //// 把另一个自转参考系从自转坐标系转换到世界坐标系
+    //void localToWorld(FrameRotation &rotation) const {
+    //}
 };
 
 struct BodyTrajectory {
@@ -68,6 +96,14 @@ struct BodyTrajectory {
     std::vector<Vector3<Kilometers>> positionHistory;
     // 每个历史记录点的时间（儒略日数）
     std::vector<JulianDays> historyInstants;
+
+    // 生成一个始终固定在指定点的轨迹
+    static BodyTrajectory fromConstantPosition(Vector3<Kilometers> const &position) {
+        BodyTrajectory ret;
+        ret.positionHistory.push_back(position);
+        ret.historyInstants.push_back(0.0);
+        return ret;
+    }
 
     // 历史记录点数量
     size_t numHistoryCount() const {
@@ -90,6 +126,25 @@ struct BodyTrajectory {
     // 轨迹尾部所在时间
     JulianDays endInstant() {
         return !historyInstants.empty() ? historyInstants.back() : 0.0;
+    }
+
+    // 平移轨迹上所有位置矢量
+    void translatePositions(Vector3<Kilometers> const &offset, Real scale = 1.0) {
+        for (size_t i = 0; i < positionHistory.size(); i++) {
+            positionHistory[i] += offset;
+            positionHistory[i] *= scale;
+        }
+    }
+
+    // 规格化所有位置矢量（投影到天球上）
+    void normalizePositions(Kilometers newLength = 1.0, bool logarithmicScaling = false) {
+        for (size_t i = 0; i < positionHistory.size(); i++) {
+            if (logarithmicScaling) {
+                positionHistory[i].setLength(newLength * std::log1p(positionHistory[i].length()));
+            } else {
+                positionHistory[i].setLength(newLength);
+            }
+        }
     }
 
     // 按指定密度重采样轨迹，用于调节采样点密度，如果指定第二参数则只保留指定时间区间内的轨迹
@@ -123,12 +178,12 @@ struct ReferenceFrame {
     Optional<BodyTrajectory> aligningTrajectory = std::nullopt;
     // 注：当存在对齐部分时旋转部分会被覆盖
 
-    // 根据是否有对齐部分，获取真正的旋转部分，如果有则需指定当前时间以及要对齐天体当前的位置和速度
-    FrameRotation getRotation(JulianDays instant, Vector3<Kilometers> const &bodyPosition) const {
+    // 根据是否有对齐部分，获取真正的旋转部分，如果有则需指定当前时间和要对齐天体当前的位置
+    FrameRotation getRotation(Vector3<Kilometers> const &bodyPosition, JulianDays instant) const {
         if (aligningTrajectory) {
             auto aligningPosition = aligningTrajectory->positionAtInstant(instant);
             auto aligningDirection = aligningPosition - bodyPosition;
-            auto aligningRotation = FrameRotation::fromDirection(aligningDirection, instant);
+            auto aligningRotation = FrameRotation::fromDirection(aligningDirection);
             return aligningRotation;
         } else {
             return rotation;
@@ -139,13 +194,13 @@ struct ReferenceFrame {
     void worldToLocal(Vector3<Kilometers> &position, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
         position -= bodyPosition;
-        getRotation(instant, bodyPosition).worldToLocal(position, instant);
+        getRotation(bodyPosition, instant).worldToLocal(position, instant);
     }
 
     // 把指定瞬间时的位置坐标从自转坐标系转换到世界坐标系
     void localToWorld(Vector3<Kilometers> &position, JulianDays instant) const {
         auto bodyPosition = trajectory.positionAtInstant(instant);
-        getRotation(instant, bodyPosition).localToWorld(position, instant);
+        getRotation(bodyPosition, instant).localToWorld(position, instant);
         position += bodyPosition;
     }
 
@@ -162,6 +217,18 @@ struct ReferenceFrame {
             localToWorld(trajectory.positionHistory[i], trajectory.historyInstants[i]);
         }
     }
+
+    //// 把坐标系从世界坐标系转换到自转坐标系
+    //void worldToLocal(ReferenceFrame &frame) const {
+        //rotation.worldToLocal(frame.rotation);
+        //worldToLocal(frame.trajectory);
+    //}
+
+    //// 把坐标系从自转坐标系转换到世界坐标系
+    //void localToWorld(ReferenceFrame &frame) const {
+        //rotation.localToWorld(frame.rotation);
+        //localToWorld(frame.trajectory);
+    //}
 };
 
 // 天体引力模型
@@ -223,6 +290,10 @@ struct SystemState {
 // 系统引力模型
 struct SystemGravityModel {
     std::vector<BodyGravityModel> bodyModels;
+
+    BodyGravityModel const &getBodyGravityModel(size_t bodyId) const {
+        return bodyModels.at(bodyId);
+    }
 
     Optional<size_t> getBodyIndexByName(std::string_view nameQuery) const {
         size_t index = 0;

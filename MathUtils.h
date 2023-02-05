@@ -48,3 +48,9 @@ static typename T::value_type linearInterpolate(T const &arr, Real val) {
     Real offset = val - (Real)index;
     return arr[index] * (1.0 - offset) + arr[index + 1] * offset;
 }
+
+template <class T1, class T2>
+static auto floorMod(T1 x, T2 y) {
+    auto xoy = x / y;
+    return (xoy - std::floor(xoy)) * y;
+}

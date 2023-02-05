@@ -6,6 +6,14 @@ template <class T>
 struct Vector3 {
     T x, y, z;
 
+    Vector3 operator+() const {
+        return *this;
+    }
+
+    Vector3 operator-() const {
+        return {-x, -y, -z};
+    }
+
     Vector3 operator+(Vector3 const &v) const {
         return {x + v.x, y + v.y, z + v.z};
     }
@@ -245,6 +253,10 @@ struct Vector3 {
         rotateByY(90.0 - axis.declination());
         rotateByZ(axis.rightAscension());
         return *this;
+    }
+
+    Degrees angleBetween(Vector3 const &v) const {
+        return std::acos(dot(v) * v.lengthInversed() * lengthInversed()) / kDegrees;
     }
 
     // 深拷贝本矢量
