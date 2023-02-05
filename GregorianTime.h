@@ -25,11 +25,11 @@ struct GregorianDate {
         Real wjd = std::floor(jd - 0.5) + 0.5;
         Real depoch = wjd - 1721425.5;
         Real quadricent = std::floor(depoch / 146097);
-        Real dqc = floorMod(depoch, 146097);
+        Real dqc = std::fmod(depoch, 146097);
         Real cent = std::floor(dqc / 36524);
-        Real dcent = floorMod(dqc, 36524);
+        Real dcent = std::fmod(dqc, 36524);
         Real quad = std::floor(dcent / 1461);
-        Real dquad = floorMod(dcent, 1461);
+        Real dquad = std::fmod(dcent, 1461);
         Real yindex = std::floor(dquad / 365);
         int year = (int)std::rint((quadricent * 400) + (cent * 100) + (quad * 4) + yindex);
         if (!((cent == 4) || (yindex == 4))) {
@@ -120,7 +120,8 @@ struct AngleInDegrees {
         int second = (int)std::floor(((factor - degree) * 60.0 - minute) * 60.0);
         int subsec = (int)std::floor((((factor - degree) * 60.0 - minute) * 60.0 - second) * 10.0);
         if (angle < 0.0) degree = -degree;
-        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "." + std::to_string(subsec) + "″";
+        return std::to_string(degree) + "°" + std::to_string(minute + 100).substr(1) + "′"
+            + std::to_string(second + 100).substr(1) + "." + std::to_string(subsec) + "″";
     }
 
     // 用字符串表示（度,分,秒）
@@ -130,7 +131,8 @@ struct AngleInDegrees {
         int minute = (int)std::floor((factor - degree) * 60.0);
         int second = (int)std::floor(((factor - degree) * 60.0 - minute) * 60.0);
         int subsec = (int)std::floor((((factor - degree) * 60.0 - minute) * 60.0 - second) * 100.0);
-        return std::to_string(degree) + "°" + std::to_string(minute) + "′" + std::to_string(second) + "." + std::to_string(subsec + 100).substr(1) + "″";
+        return std::to_string(degree) + "°" + std::to_string(minute + 100) + "′"
+            + std::to_string(second + 100).substr(1) + "." + std::to_string(subsec + 100).substr(1) + "″";
     }
 
     // 用字符串表示（时角,分,秒）
@@ -140,6 +142,7 @@ struct AngleInDegrees {
         int minute = (int)std::floor((factor - hour) * 60.0);
         int second = (int)std::floor(((factor - hour) * 60.0 - minute) * 60.0);
         int subsec = (int)std::floor((((factor - hour) * 60.0 - minute) * 60.0 - second) * 100.0);
-        return std::to_string(hour) + "h" + std::to_string(minute) + "m" + std::to_string(second) + "." + std::to_string(subsec + 100).substr(1) + "s";
+        return std::to_string(hour) + "h" + std::to_string(minute + 100).substr(1) + "m"
+            + std::to_string(second + 100).substr(1) + "." + std::to_string(subsec + 100).substr(1) + "s";
     }
 };

@@ -12,10 +12,10 @@
 SolarSystem solarSystem;
 
 void init() {
-    //auto configString1 = FileContentIO("real_solar_system/gravity_model.cfg").getContent();
-    //auto configString2 = FileContentIO("real_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
-    auto configString1 = FileContentIO("mini_solar_system/gravity_model.cfg").getContent(); // mini_solar_system: only Sun, Earth, Moon
-    auto configString2 = FileContentIO("mini_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
+    auto configString1 = FileContentIO("real_solar_system/gravity_model.cfg").getContent();
+    auto configString2 = FileContentIO("real_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
+    //auto configString1 = FileContentIO("mini_solar_system/gravity_model.cfg").getContent(); // mini_solar_system: only Sun, Earth, Moon
+    //auto configString2 = FileContentIO("mini_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
     ConfigParser configParser;
     configParser.parse(configString1);
     configParser.parse(configString2);
@@ -35,7 +35,8 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
 
     auto earthFrame = solarSystem.getBodyFixedReferenceFrame(earthId);
     ReferenceFrame locationFrame{
-        FrameRotation::fromZenithAndNorth(earthOffset, Vector3<Real>{0, 0, 1}),
+        //FrameRotation::fromZenithAndNorth(earthOffset, Vector3<Real>{0, 0, 1}),
+        FrameRotation::fromDirection({0, 0, 1}),
         BodyTrajectory::fromConstantPosition(earthOffset)};
 
     auto sunPath = solarSystem.getBodyTrajectory(sunId);
@@ -45,9 +46,9 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
     earthFrame.worldToLocal(moonPath);
     locationFrame.worldToLocal(moonPath);
 
-    //Vector3<Real> test{0, 0, 10000000.0};
-    //locationFrame.worldToLocal(test, 2433713.388863);
-    //std::cout << test.length() << ' ' << test.declination() << ' ' << test.rightAscension() - 180 << '\n';
+    //Vector3<Real> test{10000000.0, 0, 0};
+    //locationFrame.worldToLocal(test, 0);
+    //std::cout << test.length() << ' ' << test.declination() << ' ' << test.rightAscension() << '\n';
     //return;
 
     for (size_t i = 0; i < sunPath.numHistoryCount(); i++) {
@@ -62,8 +63,10 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
         Real progressRate = 1.0 - diffAngle / (sunVisualRadius + moonVisualRadius);
         std::cout << "transit " << GregorianTime::fromJulianDays(instant).toString();
         std::cout << " JD" << std::to_string(instant);
-        std::cout << " alt " << AngleInDegrees{sunPos.declination()}.toString();
-        std::cout << " az " << AngleInDegrees{sunPos.rightAscension()}.toStringAs360();
+        //std::cout << " alt " << AngleInDegrees{sunPos.declination()}.toString();
+        //std::cout << " az " << AngleInDegrees{sunPos.rightAscension()}.toStringAs360();
+        std::cout << " dec " << AngleInDegrees{sunPos.declination()}.toString();
+        std::cout << " ra " << AngleInDegrees{sunPos.rightAscension() + earthFrame.rotation.angleAtInstant(instant)}.toStringAsHourAngle();
         std::cout << " ratio " << moonSunRatio * 100 << "%";
         std::cout << " rate " << progressRate * 100 << "%";
         std::cout << '\n';
@@ -123,7 +126,7 @@ int main() {
 
     solarSystem.takeSnapshot();
     std::cout << "solving " << solarSystem.numBodies() << " bodies\n";
-    const JulianDays maxTime = 2.0 * 365.0; // simulate for 2 years
+    const JulianDays maxTime = 20.0 * 365.0; // simulate for 20 years
     const Seconds dt = 5 * 60.0; // 5 minutes per step
     const size_t numSubSteps = 4; // 20 minutes per snapshot
     const size_t maxI = (size_t)std::ceil(maxTime * 86400.0 / (numSubSteps * dt));
@@ -140,3 +143,6 @@ int main() {
     //finish();
     return 0;
 }
+// rk4 dt=5min: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′16.6″ ra 3h49m01.80s ratio 97.8435% rate 70.7393%
+// rk4 dt=1min: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′10.7″ ra 3h48m59.93s ratio 97.8431% rate 71.3207%
+// stellarium: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′07.4″ ra 3h48m58.32s ratio 99.4000% rate 43.4200%

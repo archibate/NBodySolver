@@ -255,6 +255,7 @@ struct Vector3 {
         return *this;
     }
 
+    // 计算两个矢量之间的夹角
     Degrees angleBetween(Vector3 const &v) const {
         return std::acos(dot(v) * v.lengthInversed() * lengthInversed()) / kDegrees;
     }
