@@ -62,7 +62,8 @@ struct ConfigParser {
             auto sv = getAtom();
             stripStringViewAsNumeric(sv);
             double ret = 0.0;
-            std::from_chars(sv.data(), sv.data() + sv.size(), ret);
+            if (std::from_chars(sv.data(), sv.data() + sv.size(), ret).ec != std::errc())
+                throw;
             return ret;
         }
 
@@ -70,7 +71,8 @@ struct ConfigParser {
             auto sv = getAtom();
             stripStringViewAsNumeric(sv);
             int ret = 0;
-            std::from_chars(sv.data(), sv.data() + sv.size(), ret);
+            if (std::from_chars(sv.data(), sv.data() + sv.size(), ret).ec != std::errc())
+                throw;
             return ret;
         }
 
@@ -193,10 +195,12 @@ struct ConfigParser {
     static void stripStringViewAsNumeric(std::string_view &sv) {
         size_t begpos = sv.find_first_of("1234567890-.");
         size_t endpos = sv.find_first_not_of("1234567890e+-.");
-        if (endpos == sv.npos || begpos == sv.npos) {
+        if (begpos == sv.npos) {
             sv.remove_prefix(sv.size());
         } else {
-            sv.remove_suffix(sv.size() - endpos - 1);
+            if (endpos != sv.npos) {
+                sv.remove_suffix(sv.size() - endpos - 1);
+            }
             sv.remove_prefix(begpos);
         }
     }

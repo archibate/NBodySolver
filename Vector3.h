@@ -183,7 +183,7 @@ struct Vector3 {
         return std::atan2(z, std::sqrt(x * x + y * y)) / kDegrees;
     }
 
-    // 赤经（度），以 X 轴正方向为0°度经线
+    // 赤经（度），以 X 轴正方向为天子午线
     Degrees rightAscension() const {
         return std::atan2(y, x) / kDegrees;
     }

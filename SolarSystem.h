@@ -10,12 +10,13 @@
 #include "FunctorHelpers.h"
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
+#include "ScopeProfiler.h"
 
 // 参考系转动部分
 struct FrameRotation {
     // 参考瞬间（儒略日数）
     JulianDays referenceInstant = 0.0;
-    // 参考瞬间时0°经线位置（度）
+    // 参考瞬间时子午线位置（度）
     Degrees referenceAngle = 0.0;
     // 自转频率（度/日）
     DegreesPreDay angularFrequency = 0.0;
@@ -58,7 +59,7 @@ struct FrameRotation {
         angularFrequency = 0.0;
     }
 
-    // 指定瞬间时0°经线位置（度）
+    // 指定瞬间时子午线位置（度）
     Degrees angleAtInstant(JulianDays instantQuery) const {
         JulianDays deltaTime = instantQuery - referenceInstant;
         return std::fmod(referenceAngle + angularFrequency * deltaTime, 360.0);
@@ -108,7 +109,6 @@ struct BodyTrajectory {
     // 历史记录点数量
     size_t numHistoryCount() const {
         assert(positionHistory.size() == historyInstants.size());
-        assert(velocityHistory.size() == historyInstants.size());
         return positionHistory.size();
     }
 
@@ -241,7 +241,7 @@ struct BodyGravityModel {
         Real cosValue = 0.0;
         // S[degree, order] 的值
         Real sinValue = 0.0;
-        // 注：order 为 0 时，C[degree, 0] 即为 J[degree]，S[degree, 0] 固定为 0
+        // 注：J[degree] = -sqrt(5) * C[degree, 0]，S[degree, 0] 固定为 0
     };
 
     // 引力参数（GM）
@@ -266,13 +266,41 @@ struct BodyGravityModel {
         Real distance = std::sqrt(distanceSquared);
         Real distanceCubed = distanceSquared * distance;
         Real gravityScale = gravitationalParameter / distanceCubed;
-        Vector3<KilometersPerSecond2> acceleration;
-        acceleration = delta * gravityScale;
+        Vector3<KilometersPerSecond2> acceleration = delta * gravityScale;
+        return acceleration;
+    }
+
+    // 指定中心天体（以本引力模型）位置对指定探针位置处的引力加速度，计算额外的引力摄动项
+    Vector3<KilometersPerSecond2> accurateGravityAccelerationAtPosition(Vector3<Kilometers> const &bodyPosition, Vector3<Kilometers> const &positionQuery, JulianDays instant) const {
+        Vector3<Kilometers> delta = bodyPosition - positionQuery;
+        Real distanceSquared = delta.lengthSquared();
+        Real referenceRadiusSquared = referenceRadius * referenceRadius;
+        if (distanceSquared < referenceRadiusSquared) {
+            distanceSquared = referenceRadiusSquared;
+        }
+        Real distance = std::sqrt(distanceSquared);
+        Real distanceCubed = distanceSquared * distance;
+        Real gravityScale = gravitationalParameter / distanceCubed;
+        if (!geoPotentialComponents.empty()) {
+            auto offset = -delta;
+            rotation.worldToLocal(offset, instant);
+            Real sinPhi = std::abs(offset.z / std::sqrt(offset.x * offset.x + offset.y * offset.y));
+            Real lambda = std::atan2(offset.y, offset.x);
+            Real radiusFactor = referenceRadius / distance;
+            Real extraScale = 1.0;
+            for (size_t i = 0; i < geoPotentialComponents.size(); i++) {
+                auto const &component = geoPotentialComponents[i];
+                Real parameter = component.sinValue * std::sin(component.order * lambda);
+                parameter += component.cosValue * std::cos(component.order * lambda);
+                Real Pnm = std::assoc_laguerre(component.degree, component.order, sinPhi);
+                extraScale += std::pow(radiusFactor, component.degree) * Pnm * (component.degree - 1) * parameter;
+            }
+            gravityScale *= extraScale;
+        }
+        Vector3<KilometersPerSecond2> acceleration = delta * gravityScale;
         return acceleration;
     }
 };
-
-struct SystemGravityModel; 
 
 // 系统状态
 struct SystemState {
@@ -280,10 +308,33 @@ struct SystemState {
     std::vector<Vector3<Kilometers>> positions;
     // 速度（千米/秒）
     std::vector<Vector3<KilometersPerSecond>> velocities;
+    // 旋转
+    std::vector<FrameRotation> vesselRotations;
+    // 当前时间（儒略日数）
+    JulianDays instant = 0.0;
+    // star 数量（不包括 vessel）
+    size_t starsCount = 0;
 
+    // 天体数量（包括 star + vessel）
     size_t numBodies() const {
         assert(positions.size() == velocities.size());
         return positions.size();
+    }
+
+    // star 数量
+    size_t numStars() const {
+        return starsCount;
+    }
+
+    // vessel 数量
+    size_t numVessels() const {
+        return numBodies() - numStars();
+    }
+
+    void addCustomVessel(Vector3<Kilometers> const &position, Vector3<Kilometers> const &velocity, FrameRotation const &rotation) {
+        positions.push_back(position);
+        velocities.push_back(velocity);
+        vesselRotations.push_back(rotation);
     }
 };
 
@@ -293,6 +344,10 @@ struct SystemGravityModel {
 
     BodyGravityModel const &getBodyGravityModel(size_t bodyId) const {
         return bodyModels.at(bodyId);
+    }
+
+    bool isBodyVessel(size_t bodyIndex) const {
+        return bodyIndex >= bodyModels.size();
     }
 
     Optional<size_t> getBodyIndexByName(std::string_view nameQuery) const {
@@ -322,7 +377,7 @@ struct SystemGravityModel {
                 auto &componentM = bodyM.geoPotentialComponents.emplace_back();
                 componentM.degree = 2;
                 componentM.order = 0;
-                componentM.cosValue = j2;
+                componentM.cosValue = j2 / -std::sqrt(5.0);
                 componentM.sinValue = 0.0;
             };
             bodyV.dictEntryForEach("geopotential_row", [&bodyM] (auto, auto const &rowV) {
@@ -343,9 +398,21 @@ struct SystemGravityModel {
     Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery,
                                                                 std::vector<Vector3<Kilometers>> const &bodyPositions) const {
         Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
-        for (size_t i = 0; i < bodyPositions.size(); i++) {
-            auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], positionQuery);
-            acceleration += accelI;
+        assert(bodyPositions.size() >= bodyModels.size());
+        for (size_t i = 0; i < bodyModels.size(); i++) {
+            acceleration += bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], positionQuery);
+        }
+        return acceleration;
+    }
+
+    // 指定位置受到的引力，计算额外的引力摄动项
+    Vector3<KilometersPerSecond2> accurateGravityAccelerationAtPosition(Vector3<Kilometers> positionQuery,
+                                                                        std::vector<Vector3<Kilometers>> const &bodyPositions,
+                                                                        JulianDays instant) const {
+        Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
+        assert(bodyPositions.size() >= bodyModels.size());
+        for (size_t i = 0; i < bodyModels.size(); i++) {
+            acceleration += bodyModels[i].accurateGravityAccelerationAtPosition(bodyPositions[i], positionQuery, instant);
         }
         return acceleration;
     }
@@ -354,20 +421,25 @@ struct SystemGravityModel {
     Vector3<KilometersPerSecond2> gravityAccelerationAtBody(size_t indexQuery,
                                                             std::vector<Vector3<Kilometers>> const &bodyPositions) const {
         Vector3<KilometersPerSecond2> acceleration = {0, 0, 0};
-        for (size_t i = 0; i < bodyPositions.size(); i++) {
+        assert(bodyPositions.size() >= bodyModels.size());
+        for (size_t i = 0; i < bodyModels.size(); i++) {
             if (i == indexQuery) continue;
-            auto accelI = bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], bodyPositions[indexQuery]);
-            acceleration += accelI;
+            acceleration += bodyModels[i].gravityAccelerationAtPosition(bodyPositions[i], bodyPositions[indexQuery]);
         }
         return acceleration;
     }
 
-    // 已知各个天体的位置，根据本引力模型，求各个天体受到的引力加速度
-    void evaluateGravityAccelerations(std::vector<Vector3<KilometersPerSecond2>> const &positions,
-                                      std::vector<Vector3<KilometersPerSecond2>> &accelerations) const {
+    void evaluateGravityAccelerations(std::vector<Vector3<Kilometers>> const &positions,
+                                      std::vector<Vector3<KilometersPerSecond2>> &accelerations,
+                                      JulianDays instant) const {
+        DefScopeProfiler;
 #pragma omp for simd
-        for (size_t i = 0; i < positions.size(); i++) {
+        for (size_t i = 0; i < bodyModels.size(); i++) { // stars
             accelerations[i] = gravityAccelerationAtBody(i, positions);
+        }
+#pragma omp for simd
+        for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
+            accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
         }
     }
 };
@@ -382,7 +454,7 @@ struct SystemGravityModel {
 
     //void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
         //auto &pos1 = state.positions; // p
-        //model.evaluateGravityAccelerations(pos1, acc1); // G(p)
+        //model.evaluateGravityAccelerations(pos1, acc1, state.instant); // G(p)
         //auto &vel1 = state.velocities; // v
         //freeEvolveForTime(pos1, vel1, dt); // p + h v
         //freeEvolveForTime(vel1, acc1, dt); // v + G(p)
@@ -409,6 +481,7 @@ struct RungeKuttaSolver {
     std::vector<Vector3<KilometersPerSecond2>> acc2;
     std::vector<Vector3<KilometersPerSecond2>> acc3;
     std::vector<Vector3<KilometersPerSecond2>> acc4;
+    //std::vector<Vector3<Real>> arrows;
 
     void setNumBodies(size_t n) {
         pos2.resize(n);
@@ -420,6 +493,7 @@ struct RungeKuttaSolver {
         acc2.resize(n);
         acc3.resize(n);
         acc4.resize(n);
+        //arrows.resize(n * (n - 1) / 2);
     }
 
     // https://zh.wikipedia.org/wiki/%E9%BE%99%E6%A0%BC%EF%BC%8D%E5%BA%93%E5%A1%94%E6%B3%95
@@ -445,22 +519,23 @@ struct RungeKuttaSolver {
 
     void evolveForTime(SystemGravityModel const &model, SystemState &state, Seconds dt) {
         auto const &pos1 = state.positions; // p
-        model.evaluateGravityAccelerations(pos1, acc1); // G(p)
+        model.evaluateGravityAccelerations(pos1, acc1, state.instant); // G(p)
         auto const &vel1 = state.velocities; // v
         freeEvolveForTime(pos2, pos1, vel1, dt / 2.0); // p + h/2 v
-        model.evaluateGravityAccelerations(pos2, acc2); // G(p + h/2 v)
+        model.evaluateGravityAccelerations(pos2, acc2, state.instant + dt / 2); // G(p + h/2 v)
         freeEvolveForTime(vel2, vel1, acc1, dt / 2.0); // v + h/2 G(p)
         freeEvolveForTime(pos3, pos1, vel2, dt / 2.0); // p + h/2 (v + h/2 G(p))
-        model.evaluateGravityAccelerations(pos3, acc3); // G(p + h/2 (v + h/2 G(p)))
+        model.evaluateGravityAccelerations(pos3, acc3, state.instant + dt / 2); // G(p + h/2 (v + h/2 G(p)))
         freeEvolveForTime(vel3, vel1, acc2, dt / 2.0); // v + h/2 G(p + h/2 v)
         freeEvolveForTime(pos4, pos1, vel2, dt); // p + h (v + h/2 G(p + h/2 v))
-        model.evaluateGravityAccelerations(pos4, acc4); // G(p + h (v + h/2 G(p + h/2 v)))
+        model.evaluateGravityAccelerations(pos4, acc4, state.instant + dt); // G(p + h (v + h/2 G(p + h/2 v)))
         correctedEvolvePosition(state.positions, state.velocities, dt);
         correctedEvolveVelocity(state.velocities, dt);
     }
 
     void correctedEvolvePosition(std::vector<Vector3<Kilometers>> &positions,
                                  std::vector<Vector3<KilometersPerSecond>> &velocities, Real dt) const {
+        DefScopeProfiler;
 #pragma omp for simd
         for (size_t i = 0; i < positions.size(); i++) {
             Vector3<Real> correction = (1.0 / 6.0) * (acc1[i] + acc2[i] + acc3[i]);
@@ -469,6 +544,7 @@ struct RungeKuttaSolver {
     }
 
     void correctedEvolveVelocity(std::vector<Vector3<KilometersPerSecond>> &velocities, Real dt) const {
+        DefScopeProfiler;
 #pragma omp for simd
         for (size_t i = 0; i < velocities.size(); i++) {
             Vector3<Real> acceleration = (1.0 / 6.0) * (acc1[i] + 2.0 * acc2[i] + 2.0 * acc3[i] + acc4[i]);
@@ -480,11 +556,56 @@ struct RungeKuttaSolver {
                                   std::vector<Vector3<Real>> const &positions,
                                   std::vector<Vector3<Real>> const &velocities,
                                   Seconds dt) {
+        DefScopeProfiler;
 #pragma omp for simd
         for (size_t i = 0; i < positions.size(); i++) {
             newPositions[i] = positions[i] + velocities[i] * dt;
         }
     }
+
+    //void evaluateGravityAccelerations(SystemGravityModel const &model,
+                                      //std::vector<Vector3<Kilometers>> const &positions,
+                                      //std::vector<Vector3<KilometersPerSecond2>> &accelerations) {
+        //DefScopeProfiler;
+        //auto getIJ = [] (size_t k) {
+            //size_t i = 0;
+            //for (size_t t = 0; t < k; t += i) ++i;
+            //size_t j = k - i * (i - 1) / 2;
+            //return std::make_pair(i, j);
+        //};
+        //auto makeK = [] (size_t i, size_t j) {
+            //return j + i * (i - 1) / 2;
+        //};
+        //size_t nArrows = positions.size() * (positions.size() - 1) / 2;
+//#pragma omp for simd
+        //for (size_t k = 0; k < nArrows; k++) {
+            //auto [i, j] = getIJ(k);
+            ////SHOW(positions.size());
+            ////SHOW(k);
+            ////SHOW(i);
+            ////SHOW(j);
+            //auto delta = positions[j] - positions[i];
+            //auto deltaInv2 = delta.lengthInversedSquared();
+            //auto deltaInv = std::sqrt(deltaInv2);
+            //auto deltaInv3 = deltaInv * deltaInv2;
+            //auto deltaVecInv3 = delta * deltaInv3;
+            //arrows[k] = deltaVecInv3;
+        //}
+//#pragma omp for simd
+        //for (size_t i = 0; i < positions.size(); i++) {
+            //Vector3<KilometersPerSecond2> accel{0, 0, 0};
+            //for (size_t j = 0; j < positions.size(); j++) {
+                //Vector3<Real> deltaVecInv3;
+                //if (j > i) {
+                    //deltaVecInv3 = -arrows[makeK(j, i)];
+                //} else {
+                    //deltaVecInv3 = arrows[makeK(i, j)];
+                //}
+                //accel += model.bodyModels[j].gravitationalParameter * deltaVecInv3;
+            //}
+            //accelerations[i] = accel;
+        //}
+    //}
 };
 
 // 太阳系仿真系统
@@ -492,14 +613,14 @@ struct SolarSystem {
     SystemGravityModel gravityModel;
     SystemState currentState;
     std::vector<BodyTrajectory> bodyTrajectories;
-    JulianDays currentInstant;
     RungeKuttaSolver rungeKuttaSolver;
     //TrashEulerSolver rungeKuttaSolver;
 
     void takeSnapshot() {
+        DefScopeProfiler;
         for (size_t i = 0; i < bodyTrajectories.size(); i++) {
             bodyTrajectories[i].positionHistory.push_back(currentState.positions[i]);
-            bodyTrajectories[i].historyInstants.push_back(currentInstant);
+            bodyTrajectories[i].historyInstants.push_back(currentState.instant);
         }
     }
 
@@ -511,13 +632,13 @@ struct SolarSystem {
         gravityModel.initializeFromConfig(rootV);
         {
             auto stateV = rootV.dictEntry("principia_initial_state:NEEDS[RealSolarSystem]");
-            currentInstant = stateV.dictEntry("solar_system_epoch").getDouble();
-            size_t bodyCount = stateV.dictEntryCount("body");
-            currentState.positions.resize(bodyCount);
-            currentState.velocities.resize(bodyCount);
+            currentState.instant = stateV.dictEntry("solar_system_epoch").getDouble();
+            currentState.starsCount = stateV.dictEntryCount("body");
+            currentState.positions.resize(currentState.starsCount);
+            currentState.velocities.resize(currentState.starsCount);
             stateV.dictEntryForEach("body", [this] (auto, auto const &bodyV) {
                 auto name = bodyV.dictEntry("name").getAtom();
-                auto index = gravityModel.getBodyIndexByName(name) | []F_DIE(0);
+                auto index = gravityModel.getBodyIndexByName(name) | []F_DIE();
                 auto &positionM = currentState.positions[index];
                 auto &velocityM = currentState.velocities[index];
                 positionM.x = bodyV.dictEntry("x").getDouble();
@@ -528,19 +649,27 @@ struct SolarSystem {
                 velocityM.z = bodyV.dictEntry("vz").getDouble();
             });
         }
-        assert(currentState.numBodies() == gravityModel.bodyModels.size());
+        assert(currentState.numStars() == gravityModel.bodyModels.size());
         rungeKuttaSolver.setNumBodies(currentState.numBodies());
         bodyTrajectories.resize(currentState.numBodies());
+        takeSnapshot();
     }
 
-    size_t getBodyIndexByName(std::string_view nameQuery) const {
+    size_t getBodyIndexByName(std::string_view nameQuery) const { // actually only works for stars
         return gravityModel.getBodyIndexByName(nameQuery) | []F_L0((size_t)-1);
     }
 
+    FrameRotation const &getBodyRotation(size_t bodyIndex) const {
+        if (gravityModel.isBodyVessel(bodyIndex)) {
+            return currentState.vesselRotations[bodyIndex - gravityModel.bodyModels.size()];
+        }
+        return gravityModel.bodyModels[bodyIndex].rotation;
+    }
+
     ReferenceFrame getBodyFixedReferenceFrame(size_t bodyIndex) const {
-        auto const &model = gravityModel.bodyModels[bodyIndex];
+        auto const &rotation = getBodyRotation(bodyIndex);
         auto const &trajectory = bodyTrajectories[bodyIndex];
-        return {model.rotation, trajectory};
+        return {rotation, trajectory};
     }
 
     ReferenceFrame getBodyInertialReferenceFrame(size_t bodyIndex) const {
@@ -550,27 +679,20 @@ struct SolarSystem {
     }
 
     ReferenceFrame getBodyAlignedReferenceFrame(size_t bodyIndex, size_t aligningBodyIndex) const {
-        auto const &model = gravityModel.bodyModels[bodyIndex];
+        auto const &rotation = getBodyRotation(bodyIndex);
         auto const &trajectory = bodyTrajectories[bodyIndex];
         auto const &aligningTrajectory = bodyTrajectories[aligningBodyIndex];
-        return {model.rotation, trajectory, aligningTrajectory};
+        return {rotation, trajectory, aligningTrajectory};
     }
 
     size_t numBodies() const {
         return currentState.numBodies();
     }
 
-    Vector3<KilometersPerSecond2> gravityAccelerationAtPosition(Vector3<Kilometers> positionQuery) const {
-        return gravityModel.gravityAccelerationAtPosition(positionQuery, currentState.positions);
-    }
-
-    Vector3<KilometersPerSecond2> gravityAccelerationAtBody(size_t indexQuery) const {
-        return gravityModel.gravityAccelerationAtBody(indexQuery, currentState.positions);
-    }
-
     void evolveForTime(Seconds dt) {
+        DefScopeProfiler;
         rungeKuttaSolver.evolveForTime(gravityModel, currentState, dt);
-        currentInstant = currentInstant + dt / 86400.0;
+        currentState.instant = currentState.instant + dt / 86400.0;
     }
 
     void evolveForTime(Seconds dt, size_t numSubSteps) {
