@@ -63,8 +63,6 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
         Real progressRate = 1.0 - diffAngle / (sunVisualRadius + moonVisualRadius);
         std::cout << "transit " << GregorianTime::fromJulianDays(instant).toString();
         std::cout << " JD" << std::to_string(instant);
-        //std::cout << " alt " << AngleInDegrees{sunPos.declination()}.toString();
-        //std::cout << " az " << AngleInDegrees{sunPos.rightAscension()}.toStringAs360();
         std::cout << " dec " << AngleInDegrees{sunPos.declination()}.toString();
         std::cout << " ra " << AngleInDegrees{sunPos.rightAscension() + earthFrame.rotation.angleAtInstant(instant)}.toStringAsHourAngle();
         std::cout << " ratio " << moonSunRatio * 100 << "%";
@@ -122,12 +120,13 @@ int main() {
     //return 0;
 
     DefScopeProfiler;
+    ProgressPredicter progress;
     init();
 
     solarSystem.takeSnapshot();
     std::cout << "solving " << solarSystem.numBodies() << " bodies\n";
-    const JulianDays maxTime = 20.0 * 365.0; // simulate for 20 years
-    const Seconds dt = 5 * 60.0; // 5 minutes per step
+    const JulianDays maxTime = 20.0 * 365.25; // simulate for 20 years
+    const Seconds dt = 5 * 60.0; // 5 minute per step
     const size_t numSubSteps = 4; // 20 minutes per snapshot
     const size_t maxI = (size_t)std::ceil(maxTime * 86400.0 / (numSubSteps * dt));
     std::cout << "from " << GregorianTime::fromJulianDays(solarSystem.currentInstant).toString()
@@ -135,7 +134,7 @@ int main() {
     for (size_t i = 0; i < maxI; i++) {
         solarSystem.evolveForTime(dt, numSubSteps);
         solarSystem.takeSnapshot();
-        if (i % 1000 == 0) std::cout << '\r' << i << '/' << maxI << std::flush;
+        if (i % 1000 == 0) progress(i, maxI);
     }
     std::cout << "\rsimulation done\n";
 
@@ -145,4 +144,4 @@ int main() {
 }
 // rk4 dt=5min: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′16.6″ ra 3h49m01.80s ratio 97.8435% rate 70.7393%
 // rk4 dt=1min: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′10.7″ ra 3h48m59.93s ratio 97.8431% rate 71.3207%
-// stellarium: transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′07.4″ ra 3h48m58.32s ratio 99.4000% rate 43.4200%
+// stellarium:  transit 1966/5/20 10:59:29.186 JD2439265.957977 dec 20°02′07.4″ ra 3h48m58.32s ratio 99.4000% rate 43.4200%
