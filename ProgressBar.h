@@ -16,11 +16,11 @@ public:
         auto now = std::chrono::high_resolution_clock::now();
         double elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - last).count();
         out << '\r';
-        out << "elapsed" << std::setw(4) << (int)elapsed << "s ";
+        out << "elapsed" << std::setw(4) << (int)std::floor(elapsed + 0.5) << "s ";
         if (rate <= 0.01)
             out << "remain ---s ";
         else
-            out << "remain" << std::setw(4) << (int)(elapsed * (1.0 / rate - 1.0)) << "s ";
+            out << "remain" << std::setw(4) << (int)std::floor(elapsed * (1.0 / rate - 1.0) + 0.5) << "s ";
         out << '[';
         for (int minI = (int)(rate * 20.0 - 0.5), i = 0; i < 20; i++) {
             out << " >="[(i < minI) + (i <= minI)];

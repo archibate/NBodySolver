@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MathUtils.h"
+#include <ostream>
 
 template <class T>
 struct Vector3 {
@@ -263,5 +264,9 @@ struct Vector3 {
     // 深拷贝本矢量
     Vector3 deepCopy() const {
         return *this;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, Vector3 const &v) {
+        return os << "Vector3(" << v.x << ", " << v.y << ", " << v.z << ")";
     }
 };

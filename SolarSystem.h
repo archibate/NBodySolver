@@ -11,6 +11,7 @@
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
 #include "ScopeProfiler.h"
+#include "BakedAssocLaguerre.h"
 
 // 参考系转动部分
 struct FrameRotation {
@@ -292,7 +293,7 @@ struct BodyGravityModel {
                 auto const &component = geoPotentialComponents[i];
                 Real parameter = component.sinValue * std::sin(component.order * lambda);
                 parameter += component.cosValue * std::cos(component.order * lambda);
-                Real Pnm = std::assoc_laguerre(component.degree, component.order, sinPhi);
+                Real Pnm = BakedAssocLaguerre::call(component.degree, component.order, sinPhi);
                 extraScale += std::pow(radiusFactor, component.degree) * Pnm * (component.degree - 1) * parameter;
             }
             gravityScale *= extraScale;
@@ -329,12 +330,6 @@ struct SystemState {
     // vessel 数量
     size_t numVessels() const {
         return numBodies() - numStars();
-    }
-
-    void addCustomVessel(Vector3<Kilometers> const &position, Vector3<Kilometers> const &velocity, FrameRotation const &rotation) {
-        positions.push_back(position);
-        velocities.push_back(velocity);
-        vesselRotations.push_back(rotation);
     }
 };
 
@@ -433,13 +428,16 @@ struct SystemGravityModel {
                                       std::vector<Vector3<KilometersPerSecond2>> &accelerations,
                                       JulianDays instant) const {
         DefScopeProfiler;
+//#pragma omp parallel
+        {
 #pragma omp for simd
-        for (size_t i = 0; i < bodyModels.size(); i++) { // stars
-            accelerations[i] = gravityAccelerationAtBody(i, positions);
-        }
+            for (size_t i = 0; i < bodyModels.size(); i++) { // stars
+                accelerations[i] = gravityAccelerationAtBody(i, positions);
+            }
 #pragma omp for simd
-        for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
-            accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
+            for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
+                accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
+            }
         }
     }
 };
@@ -625,7 +623,7 @@ struct SolarSystem {
     }
 
     BodyTrajectory getBodyTrajectory(size_t bodyIndex) const {
-        return bodyTrajectories[bodyIndex];
+        return bodyTrajectories.at(bodyIndex);
     }
 
     void initializeFromConfig(ConfigParser::Variant const &rootV) {
@@ -687,6 +685,14 @@ struct SolarSystem {
 
     size_t numBodies() const {
         return currentState.numBodies();
+    }
+
+    void addCustomVessel(Vector3<Kilometers> const &position, Vector3<Kilometers> const &velocity, FrameRotation const &rotation) {
+        currentState.positions.push_back(position);
+        currentState.velocities.push_back(velocity);
+        currentState.vesselRotations.push_back(rotation);
+        bodyTrajectories.emplace_back();
+        rungeKuttaSolver.setNumBodies(currentState.numBodies());
     }
 
     void evolveForTime(Seconds dt) {

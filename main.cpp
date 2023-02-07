@@ -15,6 +15,7 @@ SolarSystem solarSystem;
 
 void init() {
     DefScopeProfiler;
+    BakedAssocLaguerre::bake();
     ConfigParser configParser;
     //auto configString1 = FileContentIO("real_solar_system/gravity_model.cfg").getContent();
     //auto configString2 = FileContentIO("real_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
@@ -27,14 +28,23 @@ void init() {
 
 void addVesselOrbitAround(size_t earthId, KeplerianOrbit const &orbit) {
     auto instant = solarSystem.currentState.instant;
-    auto position = orbit.getPosition(instant);
-    auto velocity = orbit.getVelocity(instant);
-    auto const &earthRotation = solarSystem.getBodyRotation(earthId);
+    auto [position, velocity] = orbit.getPositionAndVelocity(
+        solarSystem.gravityModel.getBodyGravityModel(earthId).gravitationalParameter, instant);
+    auto earthRotation = solarSystem.getBodyRotation(earthId);
+    earthRotation.toInertial();
     earthRotation.worldToLocal(position, instant);
     earthRotation.worldToLocal(velocity, instant);
     position += solarSystem.currentState.positions[earthId];
     velocity += solarSystem.currentState.velocities[earthId];
-    solarSystem.currentState.addCustomVessel(position, velocity, FrameRotation{});
+    solarSystem.addCustomVessel(position, velocity, FrameRotation{});
+}
+
+void putgarbage() {
+    size_t earthId = solarSystem.getBodyIndexByName("Earth");
+    KeplerianOrbit satOrbit;
+    satOrbit.semiMajorAxis = solarSystem.gravityModel.getBodyGravityModel(earthId).referenceRadius + 500.0;
+    satOrbit.inclination = 50.0;
+    addVesselOrbitAround(earthId, satOrbit);
 }
 
 void detectTransits(size_t earthId, size_t sunId, size_t moonId,
@@ -102,7 +112,7 @@ void dump() {
     OBJFileWriter obj{FileContentIO("/tmp/solarSystem.obj").writeStream()};
 
     ReferenceFrame frame;
-    //frame = solarSystem.getBodyInertialReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
+    frame = solarSystem.getBodyInertialReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
     //frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
     //frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
 
@@ -118,19 +128,20 @@ void dump() {
             //&& i != solarSystem.getBodyIndexByName("Saturn")
             ) continue;
         auto trajectory = solarSystem.getBodyTrajectory(i);
-        trajectory.resampleDensity(24.0 / 24.0); // 24 hours per OBJ point
+        trajectory.resampleDensity(1.0 / 24.0 / 60.0); // 1 minutes per OBJ point
         frame.worldToLocal(trajectory);
         //trajectory.normalizePositions(149597870.7, true); // project to celestial sphere
-        obj.addCurve(trajectory.positionHistory, 1.0 / 149597870.7); // 1 AU -> 1 m
+        //obj.addCurve(trajectory.positionHistory, 1.0 / 149597870.7); // 1 AU -> 1 m
+        obj.addCurve(trajectory.positionHistory, 1.0 / 6378.1363); // 1 earth radius -> 1 m
     }
 }
 
 void compute() {
     DefScopeProfiler;
     std::cout << "solving " << solarSystem.numBodies() << " bodies\n";
-    const JulianDays maxTime = 1.0 * 365.25; // simulate for 1 year
-    const Seconds dt = 5 * 60.0; // 5 minute per step
-    const size_t numSubSteps = 4; // 20 minutes per snapshot
+    const JulianDays maxTime = 30.0; // simulate for 30 days
+    const Seconds dt = 2.0; // 2 seconds per step
+    const size_t numSubSteps = 30; // 1 minute per snapshot
     const size_t maxI = (size_t)std::ceil(maxTime * 86400.0 / (numSubSteps * dt));
     std::cout << "from " << GregorianTime::fromJulianDays(solarSystem.currentState.instant).toString()
               << " to " << GregorianTime::fromJulianDays(solarSystem.currentState.instant + maxTime).toString() << '\n';
@@ -153,6 +164,7 @@ int main() {
     //std::cout << v.rightAscension() << std::endl;
     //return 0;
     init();
+    putgarbage();
     compute();
     //analysis();
     dump();
