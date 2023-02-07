@@ -329,7 +329,7 @@ struct BodyGravityModel {
                 //extraScale += std::pow(radiusFactor, component.degree) * Pnm * (component.degree - 1) * parameter;
                 if (component.degree > 2) continue;
                 auto gpd = calculateGeoPotential(offset.x, offset.y, offset.z, referenceRadius, component.sinValue, component.cosValue, component.degree, component.order);
-                acceleration -= gravitationalParameter * gpd / distanceSquared;
+                acceleration -= gravitationalParameter * gpd * 15;
             }
         }
         return acceleration;
