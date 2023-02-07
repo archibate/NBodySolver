@@ -11,7 +11,11 @@ struct OBJFileWriter {
     size_t vertCount = 0;
 
     void addComment(const char *msg) {
-        *oss << '#' << msg << '\n';
+        *oss << "# " << msg << '\n';
+    }
+
+    void addObject(const char *name) {
+        *oss << "o " << name << '\n';
     }
 
     void addCurve(std::vector<Vector3<Real>> const &points, Real scale) {

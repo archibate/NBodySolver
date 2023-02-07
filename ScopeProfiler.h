@@ -80,8 +80,8 @@ void ScopeProfiler::printLog(std::ostream &out) {
     auto dump = [&out] (int val, int w) {
         auto tpwv = 1;
         for (int i = 0; i < w - 1; i++) tpwv *= 10;
-        if (val / tpwv > 1) {
-            if (val / 1000 / tpwv > 1) {
+        if (val > tpwv) {
+            if (val / 1000 > tpwv / 10) {
                 out << std::setw(w - 1) << val / 1000000 << 'M';
             } else {
                 out << std::setw(w - 1) << val / 1000 << 'k';

@@ -96,7 +96,7 @@ struct GregorianTime : GregorianDate {
             + " " + std::to_string(hour + 100).substr(1)
             + ":" + std::to_string(minute + 100).substr(1)
             + ":" + std::to_string(second + 100).substr(1)
-            + "." + std::to_string((int)std::floor(subSecond * 1000) + 1000).substr(1);
+            + "." + std::to_string((int)std::floor(subSecond * 100) + 100).substr(1);
     }
 };
 

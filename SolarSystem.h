@@ -11,7 +11,6 @@
 #include "ConfigParser.h"
 #include "FunctorHelpers.h"
 #include "ScopeProfiler.h"
-#include "BakedAssocLaguerre.h"
 
 // 参考系转动部分
 struct FrameRotation {
@@ -271,6 +270,41 @@ struct BodyGravityModel {
         return acceleration;
     }
 
+    // 计算额外势能的梯度
+    static Vector3<Real> calculateGeoPotential(Real x, Real y, Real z, Real r, Real s, Real c, int n, int m) {
+        using std::pow;
+        using std::sqrt;
+        using std::atan2;
+        using std::sin;
+        using std::cos;
+        using std::assoc_legendre;
+        auto r1 = sqrt(x*x + y*y + z*z);
+#include "geopot.inl"
+        return {u, v, w};
+        //auto x2 = x * x;
+        //auto y2 = y * y;
+        //auto z2 = z * z;
+        //auto r2 = x2 + y2 + z2;
+        //auto r1 = sqrt(r2);
+        //auto zor1 = z / r1;
+        //auto matan2yx = m * atan2(y, x);
+        //auto Pnm = assoc_laguerre(n, m, zor1);
+        //auto RVn = pow(r/r1,n);
+        //auto cm2yx = c * cos(matan2yx);
+        //auto sm2yx = s * sin(matan2yx);
+        //auto moxy2 = m / (x2 + y2);
+        //auto invR3 = 1 / (r1 * r2);
+        //auto RVncsm2yx = RVn*(cm2yx+sm2yx);
+        //auto nRVnCSPnmoR2 = n*RVncsm2yx*Pnm/r2;
+        //auto PnmD = assoc_laguerre(n - 1, m + 1, zor1);
+        ////if (zor1 < 0) PnmD = -PnmD;
+        //auto RVnCSPnmDoR1_5 = RVncsm2yx*PnmD*invR3;
+        //auto dx = -x*nRVnCSPnmoR2 + x*z*RVnCSPnmDoR1_5 + RVn*(y*sm2yx - y*sm2yx)*Pnm*moxy2;
+        //auto dy = -y*nRVnCSPnmoR2 + y*z*RVnCSPnmDoR1_5 + RVn*(-x*sm2yx + x*sm2yx)*Pnm*moxy2;
+        //auto dz = -z*nRVnCSPnmoR2 - RVncsm2yx*(-z2*invR3 + 1/r1)*PnmD;
+        //return {dx, dy, dz};
+    }
+
     // 指定中心天体（以本引力模型）位置对指定探针位置处的引力加速度，计算额外的引力摄动项
     Vector3<KilometersPerSecond2> accurateGravityAccelerationAtPosition(Vector3<Kilometers> const &bodyPosition, Vector3<Kilometers> const &positionQuery, JulianDays instant) const {
         Vector3<Kilometers> delta = bodyPosition - positionQuery;
@@ -282,23 +316,22 @@ struct BodyGravityModel {
         Real distance = std::sqrt(distanceSquared);
         Real distanceCubed = distanceSquared * distance;
         Real gravityScale = gravitationalParameter / distanceCubed;
-        if (!geoPotentialComponents.empty()) {
+        Vector3<KilometersPerSecond2> acceleration = delta * gravityScale;
+        if (1 && !geoPotentialComponents.empty()) {
             auto offset = -delta;
             rotation.worldToLocal(offset, instant);
-            Real sinPhi = std::abs(offset.z / std::sqrt(offset.x * offset.x + offset.y * offset.y));
-            Real lambda = std::atan2(offset.y, offset.x);
-            Real radiusFactor = referenceRadius / distance;
-            Real extraScale = 1.0;
+#pragma omp for simd
             for (size_t i = 0; i < geoPotentialComponents.size(); i++) {
                 auto const &component = geoPotentialComponents[i];
-                Real parameter = component.sinValue * std::sin(component.order * lambda);
-                parameter += component.cosValue * std::cos(component.order * lambda);
-                Real Pnm = BakedAssocLaguerre::call(component.degree, component.order, sinPhi);
-                extraScale += std::pow(radiusFactor, component.degree) * Pnm * (component.degree - 1) * parameter;
+                //Real parameter = component.sinValue * std::sin(component.order * lambda);
+                //parameter += component.cosValue * std::cos(component.order * lambda);
+                //Real Pnm = BakedAssocLaguerre()(component.degree, component.order, sinPhi);
+                //extraScale += std::pow(radiusFactor, component.degree) * Pnm * (component.degree - 1) * parameter;
+                if (component.degree > 2) continue;
+                auto gpd = calculateGeoPotential(offset.x, offset.y, offset.z, referenceRadius, component.sinValue, component.cosValue, component.degree, component.order);
+                acceleration -= gravitationalParameter * gpd / distanceSquared;
             }
-            gravityScale *= extraScale;
         }
-        Vector3<KilometersPerSecond2> acceleration = delta * gravityScale;
         return acceleration;
     }
 };
@@ -428,16 +461,14 @@ struct SystemGravityModel {
                                       std::vector<Vector3<KilometersPerSecond2>> &accelerations,
                                       JulianDays instant) const {
         DefScopeProfiler;
-//#pragma omp parallel
-        {
 #pragma omp for simd
-            for (size_t i = 0; i < bodyModels.size(); i++) { // stars
-                accelerations[i] = gravityAccelerationAtBody(i, positions);
-            }
+        for (size_t i = 0; i < bodyModels.size(); i++) { // stars
+            accelerations[i] = gravityAccelerationAtBody(i, positions);
+        }
 #pragma omp for simd
-            for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
-                accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
-            }
+        for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
+            accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
+            //accelerations[i] = gravityAccelerationAtPosition(positions[i], positions);
         }
     }
 };
