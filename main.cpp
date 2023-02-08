@@ -101,7 +101,7 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
     }
 }
 
-void analysis() { // search for solar eclipse
+void analysis() { // search for solar ecllipse
     DefScopeProfiler;
     std::cout << "analysising trajectory\n";
     auto earthId = solarSystem.getBodyIndexByName("Earth");
