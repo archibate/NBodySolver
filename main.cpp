@@ -16,10 +16,10 @@ SolarSystem solarSystem;
 void init() {
     DefScopeProfiler;
     ConfigParser configParser;
-    //auto configString1 = FileContentIO("real_solar_system/gravity_model.cfg").getContent();
-    //auto configString2 = FileContentIO("real_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
-    auto configString1 = FileContentIO("mini_solar_system/gravity_model.cfg").getContent(); // mini_solar_system: only Sun, Earth, Moon
-    auto configString2 = FileContentIO("mini_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
+    auto configString1 = FileContentIO("real_solar_system/gravity_model.cfg").getContent();
+    auto configString2 = FileContentIO("real_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
+    //auto configString1 = FileContentIO("mini_solar_system/gravity_model.cfg").getContent(); // mini_solar_system: only Sun, Earth, Moon
+    //auto configString2 = FileContentIO("mini_solar_system/initial_state_jd_2433282_500000000.cfg").getContent();
     configParser.parse(configString1);
     configParser.parse(configString2);
     solarSystem.initializeFromConfig(configParser.getConfig());
@@ -38,7 +38,7 @@ void addVesselOrbitAround(size_t earthId, KeplerianOrbit const &orbit) {
     solarSystem.addCustomVessel(position, velocity, FrameRotation{});
 }
 
-void putgarbage() {
+void putgarbage() { // put some artificial vessels
     size_t earthId = solarSystem.getBodyIndexByName("Earth");
     KeplerianOrbit satOrbit;
     //satOrbit.semiMajorAxis = 7200.0;
@@ -101,7 +101,7 @@ void detectTransits(size_t earthId, size_t sunId, size_t moonId,
     }
 }
 
-void analysis() {
+void analysis() { // search for solar eclipse
     DefScopeProfiler;
     std::cout << "analysising trajectory\n";
     auto earthId = solarSystem.getBodyIndexByName("Earth");
@@ -110,7 +110,7 @@ void analysis() {
     detectTransits(earthId, sunId, moonId, 30.0, 120.0, 0.0); // Shanghai at 30°N 120°E
 }
 
-void dump() {
+void dump() { // dump result to OBJ file
     DefScopeProfiler;
     std::cout << "saving OBJ file\n";
     OBJFileWriter obj{FileContentIO("/tmp/solarSystem.obj").writeStream()};
@@ -118,7 +118,7 @@ void dump() {
     ReferenceFrame frame;
     //frame = solarSystem.getBodyInertialReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
     //frame = solarSystem.getBodyFixedReferenceFrame(solarSystem.getBodyIndexByName("Earth"));
-    frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
+    //frame = solarSystem.getBodyAlignedReferenceFrame(solarSystem.getBodyIndexByName("Earth"), solarSystem.getBodyIndexByName("Sun"));
 
     obj.addComment("SolarSystem 1:149597870700");
     for (size_t i = 0; i < solarSystem.numBodies(); i++) {
@@ -131,22 +131,22 @@ void dump() {
             //&& i != solarSystem.getBodyIndexByName("Jupiter")
             //&& i != solarSystem.getBodyIndexByName("Saturn")
             ) continue;
+        obj.addObject(("solarSystem_" + (solarSystem.gravityModel.isBodyVessel(i) ? "Vessel" + std::to_string(i) : solarSystem.gravityModel.getBodyGravityModel(i).name)).c_str());
         auto trajectory = solarSystem.getBodyTrajectory(i);
-        trajectory.resampleDensity(10.0 / 24.0 / 60.0); // 10 minutes per OBJ point
+        trajectory.resampleDensity(24.0 / 24.0); // 24 hours per OBJ point
         frame.worldToLocal(trajectory);
         //trajectory.normalizePositions(149597870.7, true); // project to celestial sphere
-        //obj.addCurve(trajectory.positionHistory, 1.0 / 149597870.7); // 1 AU -> 1 m
-        obj.addObject(("solarSystem_" + (solarSystem.gravityModel.isBodyVessel(i) ? "Vessel" + std::to_string(i) : solarSystem.gravityModel.getBodyGravityModel(i).name)).c_str());
-        obj.addCurve(trajectory.positionHistory, 1.0 / 6378.1363); // 1 earth radius -> 1 m
+        obj.addCurve(trajectory.positionHistory, 1.0 / 149597870.7); // 1 AU -> 1 m
+        //obj.addCurve(trajectory.positionHistory, 1.0 / 6378.1363); // 1 earth radius -> 1 m
     }
 }
 
 void compute() {
     DefScopeProfiler;
     std::cout << "solving " << solarSystem.numBodies() << " bodies\n";
-    const JulianDays maxTime = 0.25 * 365.25; // simulate for 0.25 years
-    const Seconds dt = 5.0; // 5 seconds per step
-    const size_t numSubSteps = 12; // 1 minute per snapshot
+    const JulianDays maxTime = 1.0 * 365.25; // simulate for 1 year
+    const Seconds dt = 60.0; // 60 seconds per step
+    const size_t numSubSteps = 4; // 4 minutes per snapshot
     const size_t maxI = (size_t)std::ceil(maxTime * 86400.0 / (numSubSteps * dt));
     std::cout << "from " << GregorianTime::fromJulianDays(solarSystem.currentState.instant).toString()
               << " to " << GregorianTime::fromJulianDays(solarSystem.currentState.instant + maxTime).toString() << '\n';
@@ -169,7 +169,7 @@ int main() {
     //std::cout << v.rightAscension() << std::endl;
     //return 0;
     init();
-    putgarbage();
+    //putgarbage();
     compute();
     //analysis();
     dump();

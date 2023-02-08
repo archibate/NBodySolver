@@ -467,8 +467,8 @@ struct SystemGravityModel {
         }
 #pragma omp for simd
         for (size_t i = bodyModels.size(); i < positions.size(); i++) { // vessels
-            accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
-            //accelerations[i] = gravityAccelerationAtPosition(positions[i], positions);
+            //accelerations[i] = accurateGravityAccelerationAtPosition(positions[i], positions, instant);
+            accelerations[i] = gravityAccelerationAtPosition(positions[i], positions);
         }
     }
 };
